@@ -1,0 +1,9 @@
+symbols:
+  NIFTY_FUT:
+    exchange: NSE
+    tick_size: 0.05
+    lot_size: 25
+  BANKNIFTY_FUT:
+    exchange: NSE
+    tick_size: 0.05
+    lot_size: 15

@@ -1,0 +1,18 @@
+app_name: Bazaar Mind Games
+default_symbol: NIFTY_FUT
+timezone: Asia/Kolkata
+default_bar_minutes: 5
+data:
+  sample_csv: data/samples/nifty_futures_sample.csv
+  processed_dir: data/processed
+features:
+  ib_bars: 12
+  order_flow_window: 5
+  vwap_slope_window: 5
+  atr_window: 14
+models:
+  test_size_days: 1
+  random_state: 42
+backtest:
+  target_multiple: 1.5
+  stop_multiple: 1.0

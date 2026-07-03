@@ -1,0 +1,59 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "bazaar-mind-games"
+version = "0.2.0"
+description = "Decision-support MVP for intraday trading intelligence."
+readme = "README.md"
+requires-python = ">=3.11"
+authors = [{ name = "OpenAI Codex" }]
+dependencies = [
+  "fastapi==0.118.0",
+  "httpx==0.28.1",
+  "matplotlib==3.10.6",
+  "numpy==2.3.2",
+  "pandas==2.3.1",
+  "plotly==6.3.0",
+  "pydantic==2.11.7",
+  "pydantic-settings==2.10.1",
+  "python-dotenv==1.1.1",
+  "pyyaml==6.0.2",
+  "scikit-learn==1.7.1",
+  "sqlalchemy==2.0.43",
+  "streamlit==1.49.0",
+  "uvicorn[standard]==0.37.0",
+]
+
+[project.optional-dependencies]
+dev = [
+  "mypy==1.17.1",
+  "pytest==9.0.2",
+  "ruff==0.12.9",
+]
+live = [
+  "truedata==7.0.1",
+]
+ml = [
+  "xgboost==3.0.4",
+]
+
+[tool.setuptools]
+package-dir = { "" = "src" }
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.mypy]
+python_version = "3.11"
+warn_unused_configs = true

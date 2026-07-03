@@ -1,0 +1,22 @@
+weights:
+  responsive_buy:
+    near_val: 25
+    positive_divergence: 20
+    absorption: 20
+    below_vwap: 10
+    confluence: 25
+  responsive_sell:
+    near_vah: 25
+    negative_divergence: 20
+    absorption: 20
+    above_vwap: 10
+    confluence: 25
+  breakout:
+    acceptance: 25
+    poc_shift: 20
+    cvd_slope: 20
+    vwap_slope: 15
+    lvn_break: 20
+alerts:
+  confluence_threshold: 70
+  trap_threshold: 65

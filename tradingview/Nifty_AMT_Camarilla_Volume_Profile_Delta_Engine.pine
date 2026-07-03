@@ -1,0 +1,634 @@
+//@version=6
+indicator("Nifty AMT Camarilla Volume Profile Delta Engine", overlay=true, max_labels_count=500, max_lines_count=500, max_boxes_count=200)
+
+//------------------------------------------------------------------------------
+// Inputs
+//------------------------------------------------------------------------------
+
+groupSession = "Session"
+groupProfile = "Profile"
+groupDelta = "Delta"
+groupSignals = "Signals"
+groupDisplay = "Display"
+
+sessionName = input.session("0915-1530", "Nifty Session", group=groupSession)
+ibMinutes = input.int(60, "Initial Balance Minutes", minval=15, maxval=120, step=15, group=groupSession)
+profileRows = input.int(24, "Profile Rows", minval=10, maxval=80, group=groupProfile)
+profileLookbackSessions = input.int(1, "Profile Lookback Sessions", minval=1, maxval=5, group=groupProfile)
+deltaLength = input.int(14, "Delta EMA Length", minval=2, maxval=100, group=groupDelta)
+cvdMaLength = input.int(20, "CVD MA Length", minval=2, maxval=100, group=groupDelta)
+divPivotLeft = input.int(3, "Divergence Pivot Left", minval=1, maxval=10, group=groupSignals)
+divPivotRight = input.int(3, "Divergence Pivot Right", minval=1, maxval=10, group=groupSignals)
+signalThreshold = input.int(65, "Signal Threshold", minval=1, maxval=100, group=groupSignals)
+showDebugTable = input.bool(true, "Show Debug Table", group=groupDisplay)
+showCamarilla = input.bool(true, "Plot Camarilla", group=groupDisplay)
+showProfileRefs = input.bool(true, "Plot Profile References", group=groupDisplay)
+showSignals = input.bool(true, "Plot Signals", group=groupDisplay)
+
+//------------------------------------------------------------------------------
+// Constants
+//------------------------------------------------------------------------------
+
+int OPEN_UNKNOWN = 0
+int OPEN_IN_RANGE = 1
+int OPEN_IN_VALUE = 2
+int OPEN_OUTSIDE_RANGE = 3
+int OPEN_OUTSIDE_VALUE = 4
+int OPEN_GAP_UP = 5
+int OPEN_GAP_DOWN = 6
+
+int ACCEPT_UNKNOWN = 0
+int ACCEPTED = 1
+int REJECTED = -1
+
+int AUCTION_BALANCED = 0
+int AUCTION_TREND_UP = 1
+int AUCTION_TREND_DOWN = -1
+int AUCTION_TRANSITION = 2
+
+int PROFILE_BELOW_VALUE = -2
+int PROFILE_AT_VAL = -1
+int PROFILE_INSIDE_VALUE = 0
+int PROFILE_AT_VAH = 1
+int PROFILE_ABOVE_VALUE = 2
+
+int POC_FALLING = -1
+int POC_FLAT = 0
+int POC_RISING = 1
+
+int DAYTYPE_UNKNOWN = 0
+int DAYTYPE_BALANCED = 1
+int DAYTYPE_NEUTRAL = 2
+int DAYTYPE_TREND_UP = 3
+int DAYTYPE_TREND_DOWN = 4
+
+int SIGNAL_NONE = 0
+int SIGNAL_REVERSAL = 1
+int SIGNAL_BREAKOUT = 2
+int SIGNAL_ROTATION = 3
+int SIGNAL_TRAP = 4
+
+int DIR_NONE = 0
+int DIR_LONG = 1
+int DIR_SHORT = -1
+
+int REASON_CAMARILLA = 1
+int REASON_PROFILE = 2
+int REASON_DELTA = 4
+int REASON_CVD = 8
+int REASON_DIVERGENCE = 16
+int REASON_AUCTION = 32
+int REASON_POC = 64
+int REASON_PROFESSIONAL = 128
+
+//------------------------------------------------------------------------------
+// Utility Functions
+//------------------------------------------------------------------------------
+
+f_safe_div(numerator, denominator) =>
+    denominator == 0.0 ? 0.0 : numerator / denominator
+
+f_clamp(value, minValue, maxValue) =>
+    math.max(minValue, math.min(maxValue, value))
+
+f_is_new_session(sessionStr) =>
+    inSession = not na(time(timeframe.period, sessionStr))
+    inSession and not inSession[1]
+
+f_points_from_price(priceA, priceB) =>
+    math.abs(priceA - priceB)
+
+f_bool_to_int(flag) =>
+    flag ? 1 : 0
+
+f_reason_has(mask, bitValue) =>
+    (mask & bitValue) != 0
+
+//------------------------------------------------------------------------------
+// Session Reference Layer
+//------------------------------------------------------------------------------
+
+f_session_reference_engine(sessionStr, ibMins) =>
+    bool isNewSession = f_is_new_session(sessionStr)
+    bool inSession = not na(time(timeframe.period, sessionStr))
+
+    var float todayOpen = na
+    var float sessionHigh = na
+    var float sessionLow = na
+    var float ibHigh = na
+    var float ibLow = na
+    var int sessionBarIndex = 0
+    var float priorHigh = na
+    var float priorLow = na
+    var float priorClose = na
+    var float rollingSessionHigh = na
+    var float rollingSessionLow = na
+
+    if isNewSession
+        priorHigh := rollingSessionHigh
+        priorLow := rollingSessionLow
+        priorClose := close[1]
+        todayOpen := open
+        sessionHigh := high
+        sessionLow := low
+        ibHigh := high
+        ibLow := low
+        sessionBarIndex := 0
+        rollingSessionHigh := high
+        rollingSessionLow := low
+    else if inSession
+        sessionBarIndex += 1
+        sessionHigh := na(sessionHigh) ? high : math.max(sessionHigh, high)
+        sessionLow := na(sessionLow) ? low : math.min(sessionLow, low)
+        rollingSessionHigh := na(rollingSessionHigh) ? high : math.max(rollingSessionHigh, high)
+        rollingSessionLow := na(rollingSessionLow) ? low : math.min(rollingSessionLow, low)
+
+    barsForIb = math.max(1, math.round(ibMins / timeframe.multiplier))
+    if inSession and sessionBarIndex <= barsForIb
+        ibHigh := na(ibHigh) ? high : math.max(ibHigh, high)
+        ibLow := na(ibLow) ? low : math.min(ibLow, low)
+
+    minutesFromOpen = sessionBarIndex * timeframe.multiplier
+
+    [
+        isNewSession,
+        inSession,
+        sessionBarIndex,
+        minutesFromOpen,
+        todayOpen,
+        priorHigh,
+        priorLow,
+        priorClose,
+        sessionHigh,
+        sessionLow,
+        ibHigh,
+        ibLow
+    ]
+
+//------------------------------------------------------------------------------
+// Camarilla Engine
+//------------------------------------------------------------------------------
+
+f_camarilla_engine(priorHigh, priorLow, priorClose, currentClose) =>
+    range = nz(priorHigh - priorLow)
+    h3 = priorClose + range * 1.1 / 4.0
+    h4 = priorClose + range * 1.1 / 2.0
+    h5 = priorHigh / priorLow * priorClose
+    l3 = priorClose - range * 1.1 / 4.0
+    l4 = priorClose - range * 1.1 / 2.0
+    l5 = priorClose - (h5 - priorClose)
+
+    int camarillaZone = na
+    camarillaZone := currentClose > h5 ? 3 : currentClose > h4 ? 2 : currentClose > h3 ? 1 : currentClose < l5 ? -3 : currentClose < l4 ? -2 : currentClose < l3 ? -1 : 0
+    float nearestRef = na
+    nearestRef := currentClose >= priorClose ? h3 : l3
+
+    isAtExtreme = currentClose >= h4 or currentClose <= l4
+    holdAboveH4 = currentClose > h4
+    holdBelowL4 = currentClose < l4
+    rejectH4 = high > h4 and currentClose < h4
+    rejectL4 = low < l4 and currentClose > l4
+
+    [h3, h4, h5, l3, l4, l5, camarillaZone, nearestRef, isAtExtreme, holdAboveH4, holdBelowL4, rejectH4, rejectL4]
+
+//------------------------------------------------------------------------------
+// Volume Profile Engine
+//------------------------------------------------------------------------------
+
+f_volume_profile_engine(isNewSession, inSession, priorHigh, priorLow, currentClose, rows) =>
+    var float priorVAH = na
+    var float priorVAL = na
+    var float priorPOC = na
+    var float developingPOC = na
+    var float devPocSlope = 0.0
+    var int profileLocation = PROFILE_INSIDE_VALUE
+    var int valueShiftState = 0
+
+    // Placeholder profile references until histogram logic is added.
+    if isNewSession
+        priorVAH := priorHigh
+        priorVAL := priorLow
+        priorPOC := na(priorHigh) or na(priorLow) ? na : (priorHigh + priorLow) / 2.0
+        developingPOC := open
+        devPocSlope := 0.0
+
+    if inSession
+        developingPOC := nz(developingPOC, currentClose)
+        devPocSlope := ta.ema(developingPOC - nz(developingPOC[1]), 3)
+
+    profileLocation := na(priorVAH) or na(priorVAL) ? PROFILE_INSIDE_VALUE : currentClose > priorVAH ? PROFILE_ABOVE_VALUE : currentClose < priorVAL ? PROFILE_BELOW_VALUE : PROFILE_INSIDE_VALUE
+    valueShiftState := devPocSlope > 0 ? 1 : devPocSlope < 0 ? -1 : 0
+
+    [priorVAH, priorVAL, priorPOC, developingPOC, profileLocation, valueShiftState, devPocSlope]
+
+//------------------------------------------------------------------------------
+// Delta Engine
+//------------------------------------------------------------------------------
+
+f_delta_engine(deltaLen) =>
+    barRange = math.max(high - low, syminfo.mintick)
+    closeLocation = f_safe_div(close - low, barRange)
+    buyPressure = closeLocation
+    sellPressure = 1.0 - closeLocation
+    barDelta = volume * (buyPressure - sellPressure)
+    deltaEma = ta.ema(barDelta, deltaLen)
+    deltaStdev = ta.stdev(barDelta, deltaLen)
+    deltaZ = f_safe_div(barDelta - deltaEma, deltaStdev)
+    deltaMomentum = deltaEma - nz(deltaEma[1])
+    deltaExpansionUp = barDelta > deltaEma and deltaZ > 1.0
+    deltaExpansionDown = barDelta < deltaEma and deltaZ < -1.0
+    absorptionBull = barDelta > 0 and close <= open
+    absorptionBear = barDelta < 0 and close >= open
+
+    [barDelta, deltaEma, deltaZ, deltaMomentum, deltaExpansionUp, deltaExpansionDown, absorptionBull, absorptionBear]
+
+//------------------------------------------------------------------------------
+// CVD Engine
+//------------------------------------------------------------------------------
+
+f_cvd_engine(isNewSession, barDelta, maLength) =>
+    var float cvd = 0.0
+
+    if isNewSession
+        cvd := 0.0
+    cvd += nz(barDelta)
+
+    cvdMa = ta.ema(cvd, maLength)
+    cvdSlope = cvd - nz(cvd[1])
+    cvdAcceleration = cvdSlope - nz(cvdSlope[1])
+    cvdSlopeState = cvdSlope > 0 ? 1 : cvdSlope < 0 ? -1 : 0
+    cvdTrendBias = cvd > cvdMa ? 1 : cvd < cvdMa ? -1 : 0
+
+    [cvd, cvdMa, cvdSlope, cvdSlopeState, cvdAcceleration, cvdTrendBias]
+
+//------------------------------------------------------------------------------
+// Auction Context Engine
+//------------------------------------------------------------------------------
+
+f_auction_context_engine(todayOpen, priorHigh, priorLow, priorVAH, priorVAL, currentClose, ibHigh, ibLow, devPocSlope, deltaMomentum, cvdSlopeState) =>
+    int openingType = OPEN_UNKNOWN
+    int acceptanceState = ACCEPT_UNKNOWN
+    int auctionState = AUCTION_TRANSITION
+    float rotationFactor = 0.0
+    float trendPersistenceScore = 0.0
+
+    openingType := na(todayOpen) or na(priorHigh) or na(priorLow) ? OPEN_UNKNOWN :
+         todayOpen > priorHigh ? OPEN_GAP_UP :
+         todayOpen < priorLow ? OPEN_GAP_DOWN :
+         todayOpen <= priorHigh and todayOpen >= priorLow ? OPEN_IN_RANGE :
+         OPEN_OUTSIDE_RANGE
+
+    acceptanceState := currentClose > nz(priorVAH) or currentClose < nz(priorVAL) ? ACCEPTED : REJECTED
+    rotationFactor := nz(ibHigh - ibLow) == 0.0 ? 0.0 : 1.0 - f_safe_div(math.abs(currentClose - (ibHigh + ibLow) / 2.0), math.max(ibHigh - ibLow, syminfo.mintick))
+    trendPersistenceScore := f_clamp(math.abs(deltaMomentum) + math.abs(cvdSlopeState) + math.abs(devPocSlope), 0.0, 10.0)
+
+    auctionState := trendPersistenceScore >= 2.0 ? (currentClose >= todayOpen ? AUCTION_TREND_UP : AUCTION_TREND_DOWN) : rotationFactor > 0.5 ? AUCTION_BALANCED : AUCTION_TRANSITION
+
+    [openingType, acceptanceState, auctionState, rotationFactor, trendPersistenceScore]
+
+//------------------------------------------------------------------------------
+// Divergence Engine
+//------------------------------------------------------------------------------
+
+f_divergence_engine(pivotLeft, pivotRight, barDelta, cvd) =>
+    pricePivotHigh = ta.pivothigh(high, pivotLeft, pivotRight)
+    pricePivotLow = ta.pivotlow(low, pivotLeft, pivotRight)
+    deltaPivotHigh = ta.pivothigh(barDelta, pivotLeft, pivotRight)
+    deltaPivotLow = ta.pivotlow(barDelta, pivotLeft, pivotRight)
+    cvdPivotHigh = ta.pivothigh(cvd, pivotLeft, pivotRight)
+    cvdPivotLow = ta.pivotlow(cvd, pivotLeft, pivotRight)
+
+    bullDivDelta = not na(pricePivotLow) and not na(deltaPivotLow)
+    bearDivDelta = not na(pricePivotHigh) and not na(deltaPivotHigh)
+    bullDivCvd = not na(pricePivotLow) and not na(cvdPivotLow)
+    bearDivCvd = not na(pricePivotHigh) and not na(cvdPivotHigh)
+
+    divergenceStrength = f_bool_to_int(bullDivDelta or bearDivDelta) + f_bool_to_int(bullDivCvd or bearDivCvd)
+
+    [bullDivDelta, bearDivDelta, bullDivCvd, bearDivCvd, divergenceStrength]
+
+//------------------------------------------------------------------------------
+// Professional Auction Modules
+//------------------------------------------------------------------------------
+
+f_poc_migration_engine(devPocSlope) =>
+    pocMigrationState = devPocSlope > 0 ? POC_RISING : devPocSlope < 0 ? POC_FALLING : POC_FLAT
+    pocMigrationStrength = math.abs(devPocSlope)
+    [pocMigrationState, pocMigrationStrength]
+
+f_poor_high_low_engine(toleranceTicks) =>
+    poorHigh = math.abs(high - high[1]) <= toleranceTicks * syminfo.mintick and close < high
+    poorLow = math.abs(low - low[1]) <= toleranceTicks * syminfo.mintick and close > low
+    poorStructureStrength = f_bool_to_int(poorHigh) + f_bool_to_int(poorLow)
+    [poorHigh, poorLow, poorStructureStrength]
+
+f_single_print_engine(displacementLength) =>
+    rangeEma = ta.ema(high - low, displacementLength)
+    displacement = math.abs(close - open)
+    thinZone = displacement > rangeEma
+    singlePrintAbove = thinZone and close > open
+    singlePrintBelow = thinZone and close < open
+    thinZoneTop = thinZone ? high : na
+    thinZoneBottom = thinZone ? low : na
+    [singlePrintAbove, singlePrintBelow, thinZoneTop, thinZoneBottom]
+
+f_day_type_classifier(auctionState, rotationFactor, pocMigrationState, valueShiftState) =>
+    int dayType = DAYTYPE_UNKNOWN
+    float confidence = 0.0
+
+    dayType := auctionState == AUCTION_BALANCED ? DAYTYPE_BALANCED :
+         auctionState == AUCTION_TREND_UP and pocMigrationState == POC_RISING ? DAYTYPE_TREND_UP :
+         auctionState == AUCTION_TREND_DOWN and pocMigrationState == POC_FALLING ? DAYTYPE_TREND_DOWN :
+         DAYTYPE_NEUTRAL
+
+    confidence := f_clamp(math.abs(rotationFactor) + math.abs(pocMigrationState) + math.abs(valueShiftState), 0.0, 10.0)
+
+    [dayType, confidence]
+
+//------------------------------------------------------------------------------
+// Signal Engine
+//------------------------------------------------------------------------------
+
+f_signal_engine(
+    camarillaZone,
+    profileLocation,
+    deltaExpansionUp,
+    deltaExpansionDown,
+    cvdSlopeState,
+    auctionState,
+    bullDivDelta,
+    bearDivDelta,
+    bullDivCvd,
+    bearDivCvd,
+    pocMigrationState,
+    poorHigh,
+    poorLow,
+    singlePrintAbove,
+    singlePrintBelow,
+    threshold
+) =>
+    int signalType = SIGNAL_NONE
+    int signalDirection = DIR_NONE
+    int reasonMask = 0
+    float score = 0.0
+    float entryRef = na
+    float invalidRef = na
+    float target1Ref = na
+    float target2Ref = na
+
+    bullishReversalScore = 0.0
+    bearishReversalScore = 0.0
+    bullishBreakoutScore = 0.0
+    bearishBreakoutScore = 0.0
+
+    bullishReversalScore += camarillaZone <= -2 ? 15 : 0
+    bullishReversalScore += profileLocation <= PROFILE_AT_VAL ? 15 : 0
+    bullishReversalScore += bullDivDelta ? 10 : 0
+    bullishReversalScore += bullDivCvd ? 10 : 0
+    bullishReversalScore += auctionState == AUCTION_BALANCED ? 10 : 0
+    bullishReversalScore += poorLow ? 15 : 0
+    bullishReversalScore += singlePrintBelow ? 10 : 0
+
+    bearishReversalScore += camarillaZone >= 2 ? 15 : 0
+    bearishReversalScore += profileLocation >= PROFILE_AT_VAH ? 15 : 0
+    bearishReversalScore += bearDivDelta ? 10 : 0
+    bearishReversalScore += bearDivCvd ? 10 : 0
+    bearishReversalScore += auctionState == AUCTION_BALANCED ? 10 : 0
+    bearishReversalScore += poorHigh ? 15 : 0
+    bearishReversalScore += singlePrintAbove ? 10 : 0
+
+    bullishBreakoutScore += camarillaZone >= 2 ? 15 : 0
+    bullishBreakoutScore += profileLocation >= PROFILE_AT_VAH ? 15 : 0
+    bullishBreakoutScore += deltaExpansionUp ? 10 : 0
+    bullishBreakoutScore += cvdSlopeState > 0 ? 10 : 0
+    bullishBreakoutScore += auctionState == AUCTION_TREND_UP ? 15 : 0
+    bullishBreakoutScore += pocMigrationState == POC_RISING ? 10 : 0
+
+    bearishBreakoutScore += camarillaZone <= -2 ? 15 : 0
+    bearishBreakoutScore += profileLocation <= PROFILE_AT_VAL ? 15 : 0
+    bearishBreakoutScore += deltaExpansionDown ? 10 : 0
+    bearishBreakoutScore += cvdSlopeState < 0 ? 10 : 0
+    bearishBreakoutScore += auctionState == AUCTION_TREND_DOWN ? 15 : 0
+    bearishBreakoutScore += pocMigrationState == POC_FALLING ? 10 : 0
+
+    if bullishReversalScore >= threshold and bullishReversalScore >= bearishReversalScore and bullishReversalScore >= bullishBreakoutScore and bullishReversalScore >= bearishBreakoutScore
+        signalType := SIGNAL_REVERSAL
+        signalDirection := DIR_LONG
+        score := bullishReversalScore
+        reasonMask := REASON_CAMARILLA | REASON_PROFILE | REASON_DIVERGENCE | REASON_PROFESSIONAL
+    else if bearishReversalScore >= threshold and bearishReversalScore >= bullishBreakoutScore and bearishReversalScore >= bearishBreakoutScore
+        signalType := SIGNAL_REVERSAL
+        signalDirection := DIR_SHORT
+        score := bearishReversalScore
+        reasonMask := REASON_CAMARILLA | REASON_PROFILE | REASON_DIVERGENCE | REASON_PROFESSIONAL
+    else if bullishBreakoutScore >= threshold and bullishBreakoutScore >= bearishBreakoutScore
+        signalType := SIGNAL_BREAKOUT
+        signalDirection := DIR_LONG
+        score := bullishBreakoutScore
+        reasonMask := REASON_CAMARILLA | REASON_PROFILE | REASON_DELTA | REASON_CVD | REASON_AUCTION | REASON_POC
+    else if bearishBreakoutScore >= threshold
+        signalType := SIGNAL_BREAKOUT
+        signalDirection := DIR_SHORT
+        score := bearishBreakoutScore
+        reasonMask := REASON_CAMARILLA | REASON_PROFILE | REASON_DELTA | REASON_CVD | REASON_AUCTION | REASON_POC
+
+    [signalType, signalDirection, score, entryRef, invalidRef, target1Ref, target2Ref, reasonMask]
+
+//------------------------------------------------------------------------------
+// Engine Execution
+//------------------------------------------------------------------------------
+
+[
+    isNewSession,
+    inSession,
+    sessionBarIndex,
+    minutesFromOpen,
+    todayOpen,
+    priorHigh,
+    priorLow,
+    priorClose,
+    sessionHigh,
+    sessionLow,
+    ibHigh,
+    ibLow
+] = f_session_reference_engine(sessionName, ibMinutes)
+
+[
+    h3,
+    h4,
+    h5,
+    l3,
+    l4,
+    l5,
+    camarillaZone,
+    nearestCamarillaRef,
+    isAtExtreme,
+    holdAboveH4,
+    holdBelowL4,
+    rejectH4,
+    rejectL4
+] = f_camarilla_engine(priorHigh, priorLow, priorClose, close)
+
+[
+    priorVAH,
+    priorVAL,
+    priorPOC,
+    developingPOC,
+    profileLocation,
+    valueShiftState,
+    devPocSlope
+] = f_volume_profile_engine(isNewSession, inSession, priorHigh, priorLow, close, profileRows)
+
+[
+    barDelta,
+    deltaEma,
+    deltaZ,
+    deltaMomentum,
+    deltaExpansionUp,
+    deltaExpansionDown,
+    absorptionBull,
+    absorptionBear
+] = f_delta_engine(deltaLength)
+
+[
+    cvd,
+    cvdMa,
+    cvdSlope,
+    cvdSlopeState,
+    cvdAcceleration,
+    cvdTrendBias
+] = f_cvd_engine(isNewSession, barDelta, cvdMaLength)
+
+[
+    openingType,
+    acceptanceState,
+    auctionState,
+    rotationFactor,
+    trendPersistenceScore
+] = f_auction_context_engine(todayOpen, priorHigh, priorLow, priorVAH, priorVAL, close, ibHigh, ibLow, devPocSlope, deltaMomentum, cvdSlopeState)
+
+[
+    bullDivDelta,
+    bearDivDelta,
+    bullDivCvd,
+    bearDivCvd,
+    divergenceStrength
+] = f_divergence_engine(divPivotLeft, divPivotRight, barDelta, cvd)
+
+[
+    pocMigrationState,
+    pocMigrationStrength
+] = f_poc_migration_engine(devPocSlope)
+
+[
+    poorHigh,
+    poorLow,
+    poorStructureStrength
+] = f_poor_high_low_engine(4)
+
+[
+    singlePrintAbove,
+    singlePrintBelow,
+    thinZoneTop,
+    thinZoneBottom
+] = f_single_print_engine(10)
+
+[
+    dayType,
+    dayTypeConfidence
+] = f_day_type_classifier(auctionState, rotationFactor, pocMigrationState, valueShiftState)
+
+[
+    signalType,
+    signalDirection,
+    signalScore,
+    entryRef,
+    invalidRef,
+    target1Ref,
+    target2Ref,
+    reasonMask
+] = f_signal_engine(
+    camarillaZone,
+    profileLocation,
+    deltaExpansionUp,
+    deltaExpansionDown,
+    cvdSlopeState,
+    auctionState,
+    bullDivDelta,
+    bearDivDelta,
+    bullDivCvd,
+    bearDivCvd,
+    pocMigrationState,
+    poorHigh,
+    poorLow,
+    singlePrintAbove,
+    singlePrintBelow,
+    signalThreshold
+)
+
+//------------------------------------------------------------------------------
+// Visualization
+//------------------------------------------------------------------------------
+
+plot(showCamarilla ? h3 : na, "H3", color=color.new(color.orange, 0), linewidth=1)
+plot(showCamarilla ? h4 : na, "H4", color=color.new(color.red, 0), linewidth=1)
+plot(showCamarilla ? h5 : na, "H5", color=color.new(color.maroon, 0), linewidth=1)
+plot(showCamarilla ? l3 : na, "L3", color=color.new(color.teal, 0), linewidth=1)
+plot(showCamarilla ? l4 : na, "L4", color=color.new(color.green, 0), linewidth=1)
+plot(showCamarilla ? l5 : na, "L5", color=color.new(color.lime, 0), linewidth=1)
+
+plot(showProfileRefs ? priorVAH : na, "Prior VAH", color=color.new(color.fuchsia, 0), linewidth=1, style=plot.style_linebr)
+plot(showProfileRefs ? priorVAL : na, "Prior VAL", color=color.new(color.aqua, 0), linewidth=1, style=plot.style_linebr)
+plot(showProfileRefs ? priorPOC : na, "Prior POC", color=color.new(color.gray, 0), linewidth=2, style=plot.style_linebr)
+plot(showProfileRefs ? developingPOC : na, "Developing POC", color=color.new(color.yellow, 0), linewidth=2)
+
+bullSignal = showSignals and barstate.isconfirmed and signalDirection == DIR_LONG and signalType != SIGNAL_NONE
+bearSignal = showSignals and barstate.isconfirmed and signalDirection == DIR_SHORT and signalType != SIGNAL_NONE
+
+plotshape(bullSignal, title="Bull Signal", style=shape.labelup, location=location.belowbar, color=color.new(color.green, 0), text="BUY", textcolor=color.white, size=size.tiny)
+plotshape(bearSignal, title="Bear Signal", style=shape.labeldown, location=location.abovebar, color=color.new(color.red, 0), text="SELL", textcolor=color.white, size=size.tiny)
+
+//------------------------------------------------------------------------------
+// Alerts
+//------------------------------------------------------------------------------
+
+alertcondition(barstate.isconfirmed and signalType == SIGNAL_REVERSAL and signalDirection == DIR_LONG, "Bullish Reversal", "Bullish reversal signal confirmed")
+alertcondition(barstate.isconfirmed and signalType == SIGNAL_REVERSAL and signalDirection == DIR_SHORT, "Bearish Reversal", "Bearish reversal signal confirmed")
+alertcondition(barstate.isconfirmed and signalType == SIGNAL_BREAKOUT and signalDirection == DIR_LONG, "Bullish Breakout", "Bullish breakout signal confirmed")
+alertcondition(barstate.isconfirmed and signalType == SIGNAL_BREAKOUT and signalDirection == DIR_SHORT, "Bearish Breakout", "Bearish breakout signal confirmed")
+alertcondition(barstate.isconfirmed and signalType == SIGNAL_ROTATION and signalDirection == DIR_LONG, "Bullish Rotation", "Bullish rotation signal confirmed")
+alertcondition(barstate.isconfirmed and signalType == SIGNAL_ROTATION and signalDirection == DIR_SHORT, "Bearish Rotation", "Bearish rotation signal confirmed")
+alertcondition(barstate.isconfirmed and signalType == SIGNAL_TRAP and signalDirection == DIR_LONG, "Bear Trap", "Bear trap signal confirmed")
+alertcondition(barstate.isconfirmed and signalType == SIGNAL_TRAP and signalDirection == DIR_SHORT, "Bull Trap", "Bull trap signal confirmed")
+
+//------------------------------------------------------------------------------
+// Debug Table
+//------------------------------------------------------------------------------
+
+var table debugTable = table.new(position.top_right, 2, 12, border_width=1)
+
+if showDebugTable and barstate.islast
+    table.cell(debugTable, 0, 0, "Opening")
+    table.cell(debugTable, 1, 0, str.tostring(openingType))
+    table.cell(debugTable, 0, 1, "Auction")
+    table.cell(debugTable, 1, 1, str.tostring(auctionState))
+    table.cell(debugTable, 0, 2, "Day Type")
+    table.cell(debugTable, 1, 2, str.tostring(dayType))
+    table.cell(debugTable, 0, 3, "Profile")
+    table.cell(debugTable, 1, 3, str.tostring(profileLocation))
+    table.cell(debugTable, 0, 4, "POC Mig")
+    table.cell(debugTable, 1, 4, str.tostring(pocMigrationState))
+    table.cell(debugTable, 0, 5, "Delta Z")
+    table.cell(debugTable, 1, 5, str.tostring(deltaZ, format.mintick))
+    table.cell(debugTable, 0, 6, "CVD Slope")
+    table.cell(debugTable, 1, 6, str.tostring(cvdSlopeState))
+    table.cell(debugTable, 0, 7, "Div")
+    table.cell(debugTable, 1, 7, str.tostring(divergenceStrength))
+    table.cell(debugTable, 0, 8, "Score")
+    table.cell(debugTable, 1, 8, str.tostring(signalScore, format.mintick))
+    table.cell(debugTable, 0, 9, "Sig Type")
+    table.cell(debugTable, 1, 9, str.tostring(signalType))
+    table.cell(debugTable, 0, 10, "Direction")
+    table.cell(debugTable, 1, 10, str.tostring(signalDirection))
+    table.cell(debugTable, 0, 11, "Reasons")
+    table.cell(debugTable, 1, 11, str.tostring(reasonMask))

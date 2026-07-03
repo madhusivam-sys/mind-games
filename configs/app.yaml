@@ -1,0 +1,12 @@
+app:
+  name: bazaar-mind-games
+  environment: development
+  timezone: Asia/Calcutta
+
+pipeline:
+  ingestion_enabled: true
+  feature_generation_enabled: true
+  model_scoring_enabled: false
+  execution_enabled: false
+  default_symbol: NIFTY
+  lookback_bars: 20
