@@ -66,6 +66,8 @@ Initial setup list:
 
 Testing expectations:
 - Add or update pytest coverage for every new setup module.
+- Add focused unit or smoke tests for every changed non-trivial module.
+- Do not add unnecessary test cases that do not protect behavior.
 - Add prefix-stability tests for any feature or setup condition that could leak future information.
 - Add API smoke coverage when setup output schemas change.
 - Keep setup payload tests aligned with the setup contract above.

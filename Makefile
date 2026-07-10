@@ -1,5 +1,4 @@
 PYTHON ?= python
-PACKAGE = bazaar_mind_games
 SRC = src
 
 .PHONY: install install-dev test lint typecheck api dashboard pipeline format docker-build docker-api docker-dashboard
@@ -23,13 +22,13 @@ typecheck:
 	$(PYTHON) -m mypy $(SRC)
 
 api:
-	$(PYTHON) -m uvicorn $(PACKAGE).api.main:app --host 0.0.0.0 --port 8000 --reload
+	PYTHONPATH=$(SRC) $(PYTHON) -m uvicorn api.main:app --host 0.0.0.0 --port 8000 --reload
 
 dashboard:
-	$(PYTHON) -m streamlit run $(SRC)/bazaar_mind_games/dashboard/app.py
+	PYTHONPATH=$(SRC) $(PYTHON) -m streamlit run $(SRC)/dashboard/app.py
 
 pipeline:
-	$(PYTHON) -m $(PACKAGE).research.pipeline
+	$(PYTHON) run_app.py test
 
 docker-build:
 	docker compose build

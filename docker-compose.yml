@@ -5,7 +5,7 @@ services:
       dockerfile: Dockerfile
     env_file:
       - .env.example
-    command: python -m uvicorn bazaar_mind_games.api.main:app --host 0.0.0.0 --port 8000
+    command: python -m uvicorn api.main:app --host 0.0.0.0 --port 8000
     ports:
       - "8000:8000"
 
@@ -15,6 +15,6 @@ services:
       dockerfile: Dockerfile
     env_file:
       - .env.example
-    command: python -m streamlit run src/bazaar_mind_games/dashboard/app.py --server.address 0.0.0.0 --server.port 8501
+    command: python -m streamlit run src/dashboard/app.py --server.address 0.0.0.0 --server.port 8501
     ports:
       - "8501:8501"
