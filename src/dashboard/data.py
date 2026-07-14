@@ -33,14 +33,16 @@ def default_base_url() -> str:
 
 
 def dashboard_sidebar() -> tuple[str, DashboardQuery, bool]:
-    st.sidebar.markdown("## Control Deck")
-    base_url = st.sidebar.text_input("API Base URL", value=default_base_url(), key="api_base_url")
-    symbol = st.sidebar.selectbox("Symbol", options=["NIFTY-I", "BANKNIFTY-I", "NIFTY_FUT", "BANKNIFTY_FUT"], index=0, key="symbol")
-    interval = st.sidebar.selectbox("Watch Interval", options=["1min", "5min", "15min"], index=0, key="interval")
-    limit = st.sidebar.slider("History Window", min_value=60, max_value=1000, value=240, step=20, key="limit")
-    auto_refresh = st.sidebar.checkbox("Prefer live surface when available", value=True, key="prefer_live")
-    if st.sidebar.button("Refresh Now", use_container_width=True):
+    st.sidebar.markdown("### Market context")
+    st.sidebar.caption("Configure the active analysis surface.")
+    symbol = st.sidebar.selectbox("Instrument", options=["NIFTY-I", "BANKNIFTY-I", "NIFTY_FUT", "BANKNIFTY_FUT"], index=0, key="symbol")
+    interval = st.sidebar.selectbox("Analysis interval", options=["1min", "5min", "15min"], index=0, key="interval")
+    limit = st.sidebar.slider("History bars", min_value=60, max_value=1000, value=240, step=20, key="limit")
+    auto_refresh = st.sidebar.toggle("Prefer live analysis", value=True, key="prefer_live")
+    if st.sidebar.button("Refresh market context", type="primary", width="stretch"):
         clear_dashboard_cache()
+    with st.sidebar.expander("Connection settings", expanded=False):
+        base_url = st.text_input("API address", value=default_base_url(), key="api_base_url")
     return base_url, DashboardQuery(symbol=symbol, interval=interval, limit=limit), auto_refresh
 
 
@@ -54,9 +56,10 @@ def load_dashboard_context(base_url: str, query: DashboardQuery, prefer_live: bo
     try:
         payload = fetch_analysis_context(base_url, query)
     except DashboardApiError as exc:
-        detail = str(auth_status.get("detail", ""))
         if not auth_status.get("authorized", False):
-            raise DashboardApiError(f"{exc} Auth detail: {detail}") from exc
+            raise DashboardApiError(
+                "Live market data is not authorized. Review the TrueData credentials in the application environment, then refresh the market context."
+            ) from exc
         raise
 
     live_status: dict[str, Any] | None = None

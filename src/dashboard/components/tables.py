@@ -9,4 +9,4 @@ def data_table(frame: pd.DataFrame, columns: list[str] | None = None, height: in
     if columns is not None:
         available = [column for column in columns if column in working.columns]
         working = working[available]
-    st.dataframe(working, use_container_width=True, hide_index=True, height=height)
+    st.dataframe(working, width="stretch", hide_index=True, height=height, row_height=34)

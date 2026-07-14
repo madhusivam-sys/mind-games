@@ -22,7 +22,12 @@ from dashboard.theme import apply_theme, hero, panel_end, panel_start
 def main() -> None:
     apply_theme()
     base_url, query, prefer_live = dashboard_sidebar()
-    hero("Bazaar Mind Games", "Auction-market intelligence for Indian index futures with a single backend-owned context payload, clear setup hierarchy, and explicit source diagnostics.")
+    hero(
+        "Decision intelligence for the Indian market",
+        "A focused workspace for market structure, intraday context, model evidence, review discipline and liquid F&O screening.",
+        eyebrow="BAZAAR MIND GAMES",
+        badges=["Auction structure", "Risk-first signals", "F&O radar", "Auditable models"],
+    )
 
     try:
         context = load_dashboard_context(base_url, query, prefer_live)
@@ -36,11 +41,11 @@ def main() -> None:
 
     top_row = st.columns(4)
     with top_row[0]:
-        stat_card("Market State", str(brief.get("market_state", "Unknown")), str(brief.get("bias", "neutral")))
+        stat_card("Market regime", str(brief.get("market_state", "Unknown")), str(brief.get("bias", "neutral")))
     with top_row[1]:
-        stat_card("Data Source", context.data_source, context.session_mode)
+        stat_card("Data source", context.data_source, context.session_mode)
     with top_row[2]:
-        stat_card("As Of", context.as_of_timestamp.replace("T", " "), query.symbol)
+        stat_card("Last update", context.as_of_timestamp.replace("T", " "), query.symbol)
     with top_row[3]:
         auth_caption = str(context.auth_status.get("detail", "no auth detail"))
         stat_card("Auth", "ok" if context.auth_status.get("authorized") else "blocked", auth_caption)
@@ -48,7 +53,7 @@ def main() -> None:
     lower = st.columns([1.25, 1, 1])
     with lower[0]:
         panel_start()
-        st.subheader("Primary Idea")
+        st.subheader("Primary thesis")
         if primary is not None:
             score_card(str(primary["setup_name"]).replace("_", " ").title(), str(primary["score"]), str(primary["label"]), tone=str(primary["label"]))
             st.write(str(brief.get("summary", "")))

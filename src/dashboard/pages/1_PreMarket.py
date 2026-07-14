@@ -14,7 +14,7 @@ from dashboard.theme import apply_theme, hero
 
 apply_theme()
 base_url, query, prefer_live = dashboard_sidebar()
-hero("Pre-Market Structure", "Prior value, Camarilla, CPR, session mode, and the source state behind the briefing.")
+hero("Pre-market structure", "Start with prior value, Camarilla and CPR levels before the session adds noise.", eyebrow="SESSION PREPARATION", badges=["Prior value", "Camarilla", "CPR", "Source diagnostics"])
 
 try:
     context = load_dashboard_context(base_url, query, prefer_live)
@@ -41,14 +41,14 @@ with cards[1]:
 with cards[2]:
     narrative_card("Data Status", f"Mode {context.session_mode} | As of {context.as_of_timestamp.replace('T', ' ')}")
 
-st.subheader("Auth Diagnostics")
+st.subheader("Connection diagnostics")
 data_table(
     st.session_state.get("_auth_frame") if False else __import__('pandas').DataFrame([context.auth_status]),
     ["configured", "authorized", "detail", "symbol", "as_of"],
     height=140,
 )
 
-st.subheader("Recent Context Bar")
+st.subheader("Reference session")
 history = context.features.copy() if not context.features.empty else context.history.copy()
 previous_frame = history[history["session_date"] == prior["session_date"]].tail(1) if "session_date" in history.columns else history.tail(1)
 data_table(previous_frame, ["timestamp", "symbol", "developing_poc", "vah", "val", "h3", "h4", "l3", "l4", "pivot", "bc", "tc"], height=150)

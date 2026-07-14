@@ -17,6 +17,7 @@ This platform is intentionally analytics-only. It does not place trades or conne
 - FastAPI service endpoints and a Streamlit dashboard
 - NSE stock-futures CPR scanner with official F&O UDiFF bhavcopy download/upload
 - Scheduled 9 PM IST Telegram watchlist reports with auditable scan reasons
+- Branded professional workspace using the supplied Bazaar Mind Games logo, Montserrat display typography, Lato body typography, and the official teal/indigo/green/olive palette
 
 ## Repo Structure
 
@@ -76,7 +77,11 @@ streamlit run src/dashboard/app.py
 python run_app.py dashboard
 ```
 
-Open **CPR Scanner** in the Streamlit sidebar. It downloads only the official NSE F&O UDiFF bhavcopy or scans uploaded F&O CSV/ZIP files. The universe is restricted to stock futures: modern `STF` rows are normalized to legacy `FUTSTK`; cash equities, index futures, and options are excluded. The scanner covers narrow, ascending/descending, reversal, virgin, inside/outside, Camarilla S3/R3, and developing CPR conditions.
+Open **CPR Scanner** in the Streamlit sidebar. It downloads only the official NSE F&O UDiFF bhavcopy or scans uploaded F&O CSV/ZIP files. The universe is restricted to stock futures: modern `STF` rows are normalized to legacy `FUTSTK`; cash equities, index futures, and options are excluded. Each nightly scan retains only the 50 most liquid underlyings, ranked by 20-session median FUTSTK turnover aggregated across all expiries. CPR prices still use the nearest-expiry contract.
+
+The action-board score is auditable. The original CPR/Camarilla conditions create the technical score. Aggregate futures OI then confirms or challenges that direction: long buildup is price up/OI up, short buildup is price down/OI up, short covering is price up/OI down, and long unwinding is price down/OI down. A matching buildup adds up to 3 points, a matching covering/unwinding regime adds 1, and conflicting OI subtracts 1–3; exceptional OI participation adds one more point in the same direction. OI never changes the CPR direction by itself.
+
+The latest official NSE combined-OI report supplies MWPL utilization using Future Equivalent Open Interest. Utilization from 80–90% subtracts 1 point, 90% or higher subtracts 3, and 95% or an official `No Fresh Positions` status prevents the candidate from entering the Telegram shortlist. If the separate MWPL report is temporarily unavailable, the scanner labels it unavailable instead of estimating it.
 
 ## Telegram CPR Report
 

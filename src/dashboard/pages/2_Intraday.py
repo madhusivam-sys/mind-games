@@ -25,7 +25,7 @@ def _best_score(scores: list[dict[str, object]]) -> dict[str, object] | None:
 
 apply_theme()
 base_url, query, prefer_live = dashboard_sidebar()
-hero("Intraday Command Center", "One backend-owned trade brief, explicit source and auth diagnostics, and 1-minute watch versus confirmed 5-minute action in one place.")
+hero("Intraday command center", "Read the confirmed market thesis, live triggers, invalidation and watch conditions without losing the chart context.", eyebrow="LIVE DECISION DESK", badges=["5-minute confirmation", "1-minute watch", "Risk levels", "Live context"])
 
 try:
     context = load_dashboard_context(base_url, query, prefer_live)
@@ -82,14 +82,14 @@ with charts[0]:
 with charts[1]:
     score_distribution(watch_scores, "1-Minute Watch Scores")
 
-st.subheader("Action Table")
+st.subheader("Setup ranking")
 action_frame = pd.DataFrame(confirmed_scores)
 if action_frame.empty:
     st.info("No confirmed scores available.")
 else:
     data_table(action_frame.sort_values(by=["score"], ascending=False), ["setup_name", "score", "label", "summary", "invalidation"], height=260)
 
-st.subheader("Alerts")
+st.subheader("Market alerts")
 alert_frame = pd.DataFrame(active_payload.get("alerts", context.signal_snapshot.get("alerts", [])))
 if alert_frame.empty:
     st.info("No alerts in the latest snapshot.")

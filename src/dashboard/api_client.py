@@ -31,10 +31,16 @@ def _raise_for_error(response: httpx.Response) -> None:
 
 
 def fetch_json(base_url: str, path: str, params: dict[str, Any] | None = None, method: str = "GET", json_body: dict[str, Any] | None = None) -> dict[str, Any] | list[Any]:
-    with _client(base_url) as client:
-        response = client.request(method=method, url=path, params=params, json=json_body)
+    try:
+        with _client(base_url) as client:
+            response = client.request(method=method, url=path, params=params, json=json_body)
+    except httpx.RequestError as exc:
+        raise DashboardApiError("The analysis service is currently unavailable. Check the API connection and try again.") from exc
     _raise_for_error(response)
-    return response.json()
+    try:
+        return response.json()
+    except ValueError as exc:
+        raise DashboardApiError("The analysis service returned an unreadable response. Please try again.") from exc
 
 
 @st.cache_data(ttl=10, show_spinner=False)

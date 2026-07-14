@@ -15,7 +15,7 @@ from dashboard.theme import apply_theme, hero
 
 apply_theme()
 base_url, query, prefer_live = dashboard_sidebar()
-hero("Model Insights", "Model output now shares the same backend context, source stamp, and auth state as the trading brief.")
+hero("Model insights", "Use model probabilities as supporting evidence alongside the same market context shown across the workspace.", eyebrow="QUANTITATIVE EVIDENCE", badges=["Day type", "Breakout probability", "Reversal probability"])
 
 try:
     context = load_dashboard_context(base_url, query, prefer_live)

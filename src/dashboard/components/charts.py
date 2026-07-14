@@ -22,25 +22,28 @@ def price_chart(frame: pd.DataFrame, title: str = "Auction Context") -> None:
                 low=working["low"],
                 close=working["close"],
                 name="Price",
-                increasing_line_color="#0f9d7a",
-                decreasing_line_color="#c2410c",
+                increasing_line_color="#3C7B53",
+                decreasing_line_color="#B84A3A",
             )
         )
-    for column, color in [("vwap", "#c58b2a"), ("developing_poc", "#182535"), ("vah", "#2563eb"), ("val", "#dc2626")]:
+    for column, color in [("vwap", "#D5A63D"), ("developing_poc", "#333333"), ("vah", "#20959A"), ("val", "#B84A3A")]:
         if column in working.columns:
             figure.add_trace(
                 go.Scatter(x=working["timestamp"], y=working[column], mode="lines", line={"width": 2, "color": color}, name=column.upper())
             )
 
     figure.update_layout(
-        title=title,
         template="plotly_white",
+        font={"family": "Lato", "color": "#333333", "size": 12},
+        title={"text": title, "font": {"family": "Montserrat", "size": 17, "color": "#333333"}, "x": 0.02},
         height=430,
         margin={"l": 10, "r": 10, "t": 55, "b": 10},
         legend={"orientation": "h", "y": 1.06},
         xaxis_rangeslider_visible=False,
         paper_bgcolor="rgba(0,0,0,0)",
-        plot_bgcolor="rgba(255,255,255,0.35)",
+        plot_bgcolor="rgba(255,254,250,0.35)",
+        xaxis={"gridcolor": "rgba(56,56,97,.08)", "linecolor": "rgba(56,56,97,.12)"},
+        yaxis={"gridcolor": "rgba(56,56,97,.08)", "linecolor": "rgba(56,56,97,.12)"},
     )
     st.plotly_chart(figure, use_container_width=True)
 
@@ -54,10 +57,15 @@ def score_distribution(scores: list[dict[str, object]], title: str) -> None:
         go.Bar(
             x=frame["setup_name"],
             y=frame["score"],
-            marker_color=["#c58b2a" if label == "watch" else "#182535" for label in frame["label"]],
+            marker_color=["#D5A63D" if label == "watch" else "#383861" for label in frame["label"]],
             text=frame["label"],
             textposition="outside",
         )
     )
-    figure.update_layout(title=title, template="plotly_white", height=340, margin={"l": 10, "r": 10, "t": 55, "b": 10})
+    figure.update_layout(
+        title={"text": title, "font": {"family": "Montserrat", "size": 16, "color": "#333333"}, "x": 0.02},
+        template="plotly_white", height=340, margin={"l": 10, "r": 10, "t": 55, "b": 10},
+        font={"family": "Lato", "color": "#333333"}, paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(255,254,250,.35)", yaxis={"gridcolor": "rgba(56,56,97,.08)"},
+    )
     st.plotly_chart(figure, use_container_width=True)
