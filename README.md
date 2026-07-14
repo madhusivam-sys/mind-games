@@ -15,7 +15,7 @@ This platform is intentionally analytics-only. It does not place trades or conne
 - Baseline ML training and evaluation scripts
 - Lightweight backtest and journal analytics modules
 - FastAPI service endpoints and a Streamlit dashboard
-- NSE equity and F&O CPR scanner with official UDiFF bhavcopy download/upload
+- NSE stock-futures CPR scanner with official F&O UDiFF bhavcopy download/upload
 - Scheduled 9 PM IST Telegram watchlist reports with auditable scan reasons
 
 ## Repo Structure
@@ -76,7 +76,7 @@ streamlit run src/dashboard/app.py
 python run_app.py dashboard
 ```
 
-Open **CPR Scanner** in the Streamlit sidebar. It can download recent official NSE UDiFF bhavcopies or scan uploaded CSV/ZIP files. The scanner covers narrow, ascending/descending, reversal, virgin, inside/outside, Camarilla S3/R3, and developing CPR conditions.
+Open **CPR Scanner** in the Streamlit sidebar. It downloads only the official NSE F&O UDiFF bhavcopy or scans uploaded F&O CSV/ZIP files. The universe is restricted to stock futures: modern `STF` rows are normalized to legacy `FUTSTK`; cash equities, index futures, and options are excluded. The scanner covers narrow, ascending/descending, reversal, virgin, inside/outside, Camarilla S3/R3, and developing CPR conditions.
 
 ## Telegram CPR Report
 
@@ -88,12 +88,12 @@ TELEGRAM_CHAT_ID=...
 DASHBOARD_PASSWORD=use-a-long-private-password
 CPR_REPORT_HOUR=21
 CPR_REPORT_MINUTE=0
-CPR_SCANNER_SEGMENTS=CM
+CPR_SCANNER_SEGMENTS=FO
 CPR_REPORT_MAX_ATTEMPTS=3
 CPR_REPORT_RETRY_MINUTES=15
 ```
 
-Run `docker compose up --build` for the web dashboard, API, and persistent daily scheduler. Use `CPR_SCANNER_SEGMENTS=CM,FO` to include nearest-expiry futures. The configured timezone defaults to `Asia/Kolkata`. A failed nightly download or Telegram request is retried three times at 15-minute intervals by default.
+Run `docker compose up --build` for the web dashboard, API, and persistent daily scheduler. The scanner is fixed to the NSE F&O segment and selects the nearest-expiry stock future per symbol. The configured timezone defaults to `Asia/Kolkata`. A failed nightly download or Telegram request is retried three times at 15-minute intervals by default.
 
 The output is an end-of-day technical watchlist, not investment advice or an execution signal.
 

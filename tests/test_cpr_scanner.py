@@ -6,8 +6,9 @@ from zipfile import ZipFile
 from zoneinfo import ZoneInfo
 
 import pandas as pd
+import pytest
 
-from services.cpr_scanner import ScanConfig, load_bhavcopy_files, normalise_bhavcopy, scan_latest, telegram_report
+from services.cpr_scanner import BhavcopyError, ScanConfig, download_bhavcopy_history, load_bhavcopy_files, normalise_bhavcopy, scan_latest, telegram_report
 from services.cpr_scheduler import _next_run
 
 
@@ -32,46 +33,44 @@ def _history() -> pd.DataFrame:
                 "close": close,
                 "volume": 1000 + offset,
                 "turnover": 0.0,
-                "asset_type": "Equity",
+                "asset_type": "F&O Stock Future",
             }
         )
     return pd.DataFrame(rows)
 
 
-def test_normalise_udiff_cash_bhavcopy() -> None:
+def test_normalise_rejects_cash_bhavcopy() -> None:
     raw = pd.DataFrame(
         {
-            "TradDt": ["2026-07-10", "2026-07-10"],
-            "TckrSymb": ["SBIN", "NIFTY"],
-            "SctySrs": ["EQ", "INDEX"],
-            "FinInstrmTp": ["STK", "INDEX"],
-            "OpnPric": [800.0, 25000.0],
-            "HghPric": [810.0, 25100.0],
-            "LwPric": [790.0, 24900.0],
-            "ClsPric": [805.0, 25050.0],
-            "TtlTradgVol": [10_000, 0],
+            "TradDt": ["2026-07-10"] * 3,
+            "TckrSymb": ["SBIN", "NIFTY", "ILLIQUID"],
+            "SctySrs": ["EQ", "INDEX", "BE"],
+            "FinInstrmTp": ["STK", "INDEX", "STK"],
+            "OpnPric": [800.0, 25000.0, 10.0],
+            "HghPric": [810.0, 25100.0, 11.0],
+            "LwPric": [790.0, 24900.0, 9.0],
+            "ClsPric": [805.0, 25050.0, 10.5],
+            "TtlTradgVol": [10_000, 0, 100],
         }
     )
 
-    result = normalise_bhavcopy(raw)
-
-    assert result["symbol"].tolist() == ["SBIN"]
-    assert result["asset_type"].tolist() == ["Equity"]
+    with pytest.raises(BhavcopyError, match="No NSE stock-futures"):
+        normalise_bhavcopy(raw)
 
 
 def test_normalise_fo_selects_nearest_future_and_excludes_option() -> None:
     raw = pd.DataFrame(
         {
-            "TradDt": ["2026-07-10"] * 3,
-            "TckrSymb": ["SBIN"] * 3,
-            "FinInstrmTp": ["FUTSTK", "FUTSTK", "OPTSTK"],
-            "XpryDt": ["2026-07-30", "2026-08-27", "2026-07-30"],
-            "OptnTp": ["", "", "CE"],
-            "OpnPric": [800.0, 805.0, 10.0],
-            "HghPric": [810.0, 815.0, 12.0],
-            "LwPric": [790.0, 795.0, 8.0],
-            "ClsPric": [805.0, 810.0, 11.0],
-            "TtlTradgVol": [10_000, 5_000, 100_000],
+            "TradDt": ["2026-07-10"] * 4,
+            "TckrSymb": ["SBIN", "SBIN", "SBIN", "NIFTY"],
+            "FinInstrmTp": ["STF", "FUTSTK", "OPTSTK", "FUTIDX"],
+            "XpryDt": ["2026-07-30", "2026-08-27", "2026-07-30", "2026-07-30"],
+            "OptnTp": ["", "", "CE", ""],
+            "OpnPric": [800.0, 805.0, 10.0, 25000.0],
+            "HghPric": [810.0, 815.0, 12.0, 25100.0],
+            "LwPric": [790.0, 795.0, 8.0, 24900.0],
+            "ClsPric": [805.0, 810.0, 11.0, 25050.0],
+            "TtlTradgVol": [10_000, 5_000, 100_000, 50_000],
         }
     )
 
@@ -79,7 +78,8 @@ def test_normalise_fo_selects_nearest_future_and_excludes_option() -> None:
 
     assert len(result) == 1
     assert result.iloc[0]["close"] == 805.0
-    assert result.iloc[0]["asset_type"] == "F&O"
+    assert result.iloc[0]["instrument"] == "FUTSTK"
+    assert result.iloc[0]["asset_type"] == "F&O Stock Future"
 
 
 def test_scanner_returns_auditable_ranked_candidate() -> None:
@@ -120,8 +120,8 @@ def test_next_run_uses_same_day_before_cutoff_and_tomorrow_after() -> None:
 
 def test_load_bhavcopy_files_accepts_nse_zip() -> None:
     csv_payload = (
-        "TradDt,TckrSymb,SctySrs,FinInstrmTp,OpnPric,HghPric,LwPric,ClsPric,TtlTradgVol\n"
-        "2026-07-10,SBIN,EQ,STK,800,810,790,805,10000\n"
+        "TradDt,TckrSymb,FinInstrmTp,XpryDt,OptnTp,OpnPric,HghPric,LwPric,ClsPric,TtlTradgVol\n"
+        "2026-07-10,SBIN,STF,2026-07-30,,800,810,790,805,10000\n"
     ).encode()
     archive = BytesIO()
     with ZipFile(archive, "w") as output:
@@ -129,4 +129,11 @@ def test_load_bhavcopy_files_accepts_nse_zip() -> None:
 
     result = load_bhavcopy_files([("BhavCopy.zip", archive.getvalue())])
 
-    assert result[["symbol", "asset_type"]].to_dict("records") == [{"symbol": "SBIN", "asset_type": "Equity"}]
+    assert result[["symbol", "instrument", "asset_type"]].to_dict("records") == [
+        {"symbol": "SBIN", "instrument": "FUTSTK", "asset_type": "F&O Stock Future"}
+    ]
+
+
+def test_download_rejects_non_fo_segments_before_network() -> None:
+    with pytest.raises(BhavcopyError, match="only the NSE F&O bhavcopy"):
+        download_bhavcopy_history(date(2026, 7, 10), 3, ("CM",))

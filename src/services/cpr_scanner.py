@@ -96,22 +96,20 @@ def normalise_bhavcopy(frame: pd.DataFrame) -> pd.DataFrame:
     normalised = normalised.dropna(subset=["session_date", "symbol", "open", "high", "low", "close"])
     normalised = normalised[(normalised["symbol"] != "") & (normalised["high"] >= normalised["low"])]
 
-    is_future = normalised["instrument"].str.contains("FUT", na=False) | (
-        normalised["expiry"].notna() & normalised["option_type"].isin(["", "XX", "NA"])
-    )
-    is_cash = normalised["expiry"].isna() & ~normalised["instrument"].str.contains("OPT", na=False)
-    cash_rows = normalised[is_cash & normalised["series"].isin(["", "EQ", "BE"])].copy()
-    cash_rows["asset_type"] = "Equity"
-
-    future_rows = normalised[is_future].copy()
-    future_rows["asset_type"] = "F&O"
+    # Keep the scanner futures-only. UDiFF uses STF for stock futures while
+    # legacy files use FUTSTK; both are normalized to the canonical FUTSTK
+    # label. Cash shares, options, and index futures are intentionally excluded.
+    is_stock_future = normalised["instrument"].isin(["STF", "FUTSTK"])
+    future_rows = normalised[is_stock_future].copy()
+    future_rows["instrument"] = "FUTSTK"
+    future_rows["asset_type"] = "F&O Stock Future"
     if not future_rows.empty:
         future_rows = future_rows.sort_values(["symbol", "session_date", "expiry"])
         future_rows = future_rows.groupby(["symbol", "session_date"], as_index=False, sort=False).first()
 
-    result = pd.concat([cash_rows, future_rows], ignore_index=True)
+    result = future_rows.reset_index(drop=True)
     if result.empty:
-        raise BhavcopyError("No EQ/BE equities or futures contracts were found in the supplied bhavcopy")
+        raise BhavcopyError("No NSE stock-futures contracts (FUTSTK/STF) were found in the supplied F&O bhavcopy")
     return result.sort_values(["symbol", "session_date"]).drop_duplicates(["symbol", "session_date", "asset_type"], keep="last").reset_index(drop=True)
 
 
@@ -142,7 +140,7 @@ def _archive_url(session_date: date, segment: str) -> str:
 def download_bhavcopy_history(
     as_of: date,
     trading_days: int = 20,
-    segments: tuple[str, ...] = ("CM",),
+    segments: tuple[str, ...] = ("FO",),
     client: httpx.Client | None = None,
 ) -> pd.DataFrame:
     """Download recent official NSE UDiFF bhavcopies, skipping holidays/weekends."""
@@ -151,6 +149,8 @@ def download_bhavcopy_history(
         raise BhavcopyError("History must be between 3 and 90 trading days")
     owned_client = client is None
     http = client or httpx.Client(timeout=20.0, follow_redirects=True, headers={"User-Agent": "Mozilla/5.0 CPRScanner/1.0"})
+    if tuple(segment.upper() for segment in segments) != ("FO",):
+        raise BhavcopyError("The CPR scanner accepts only the NSE F&O bhavcopy (FO stock futures)")
     frames: list[pd.DataFrame] = []
     try:
         for segment in segments:

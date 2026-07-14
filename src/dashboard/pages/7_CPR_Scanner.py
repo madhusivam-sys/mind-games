@@ -33,19 +33,16 @@ def main() -> None:
 
     source_tab, upload_tab, rules_tab = st.tabs(["Download from NSE", "Upload bhavcopies", "How signals work"])
     with source_tab:
-        left, middle, right = st.columns([1.1, 1, 1])
+        left, middle = st.columns([1.1, 1])
         with left:
             as_of = st.date_input("Latest trading date", value=date.today(), max_value=date.today())
         with middle:
             history_days = st.slider("Trading days", min_value=5, max_value=40, value=20)
-        with right:
-            universe = st.selectbox("Universe", ["Equity", "F&O futures", "Equity + F&O"])
-        st.caption("NSE publishes the UDiFF common bhavcopy after market close. Holidays and missing dates are skipped automatically.")
+        st.caption("Only NSE stock futures from the F&O bhavcopy are screened. Modern STF rows are shown as legacy FUTSTK. Holidays and missing dates are skipped automatically.")
         if st.button("Download & scan", type="primary", width="stretch"):
-            segments = ("CM",) if universe == "Equity" else ("FO",) if universe == "F&O futures" else ("CM", "FO")
             try:
                 with st.spinner("Downloading official NSE end-of-day files…"):
-                    history = download_bhavcopy_history(as_of, history_days, segments)
+                    history = download_bhavcopy_history(as_of, history_days, ("FO",))
                 _store_scan(history)
             except (BhavcopyError, OSError) as exc:
                 st.error(str(exc))
@@ -74,6 +71,8 @@ def main() -> None:
             - **Inside / outside CPR:** today's range of BC–TC is contained by, or contains, the previous CPR.
             - **Camarilla S3 / R3:** close is within 0.35% of the prior-range S3 or R3 level.
             - **Developing CPR:** tomorrow's CPR, calculated from today's completed high, low, and close.
+
+            Only NSE stock futures are screened. Modern UDiFF `STF` rows are normalized to legacy `FUTSTK`; cash equities, index futures, and all options are excluded.
 
             Results are technical watchlist candidates, not buy/sell signals. Corporate actions and unusual volume should be checked separately.
             """

@@ -75,7 +75,7 @@ class Settings(BaseSettings):
     cpr_report_hour: int = Field(default=21, ge=0, le=23, alias="CPR_REPORT_HOUR")
     cpr_report_minute: int = Field(default=0, ge=0, le=59, alias="CPR_REPORT_MINUTE")
     cpr_scanner_history_days: int = Field(default=20, ge=3, le=90, alias="CPR_SCANNER_HISTORY_DAYS")
-    cpr_scanner_segments: str = Field(default="CM", alias="CPR_SCANNER_SEGMENTS")
+    cpr_scanner_segments: str = Field(default="FO", alias="CPR_SCANNER_SEGMENTS")
     cpr_scanner_report_limit: int = Field(default=10, ge=1, le=30, alias="CPR_SCANNER_REPORT_LIMIT")
     cpr_report_max_attempts: int = Field(default=3, ge=1, le=10, alias="CPR_REPORT_MAX_ATTEMPTS")
     cpr_report_retry_minutes: int = Field(default=15, ge=1, le=120, alias="CPR_REPORT_RETRY_MINUTES")
