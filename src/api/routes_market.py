@@ -3,7 +3,6 @@ from __future__ import annotations
 
 from dataclasses import asdict
 from typing import Callable
-
 from fastapi import APIRouter, HTTPException, Query
 
 from integrations.live_market_data_client import LiveMarketDataClientError

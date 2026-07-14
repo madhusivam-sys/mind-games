@@ -10,17 +10,11 @@ from integrations.market_data_client import MarketDataClientError
 from services.live_runtime import LiveRuntime
 from services.market_data_service import MarketDataSnapshot, build_live_market_data_service
 from services.signal_service import SignalService, to_jsonifiable
-from utils.config import get_settings
 
 router = APIRouter(tags=["market-data"])
 market_data_service = build_live_market_data_service()
 signal_service = SignalService(market_data_service=market_data_service)
 live_runtime = LiveRuntime(market_data_service=market_data_service)
-
-
-@router.get("/health")
-def health() -> dict[str, str]:
-    return {"status": "ok", "service": get_settings().app_name}
 
 
 @router.post("/live/start")
