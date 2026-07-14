@@ -45,6 +45,7 @@ class Settings(BaseSettings):
 
     app_env: str = Field(default="development", alias="APP_ENV")
     app_name: str = Field(default="Bazaar Mind Games", alias="APP_NAME")
+    dashboard_password: str | None = Field(default=None, alias="DASHBOARD_PASSWORD")
     data_root: Path = Field(default=ROOT_DIR / "data", alias="DATA_ROOT")
     database_url: str = Field(default="sqlite:///./data/processed/bazaar_mind_games.db", alias="DATABASE_URL")
     default_symbol: str = Field(default="NIFTY_FUT", alias="DEFAULT_SYMBOL")
@@ -69,6 +70,15 @@ class Settings(BaseSettings):
     truedata_live_dry_run: bool = Field(default=False, alias="TRUEDATA_LIVE_DRY_RUN")
     truedata_live_backfill_interval: str = Field(default="1min", alias="TRUEDATA_LIVE_BACKFILL_INTERVAL")
     truedata_live_backfill_bars: int = Field(default=200, alias="TRUEDATA_LIVE_BACKFILL_BARS")
+    telegram_bot_token: str | None = Field(default=None, alias="TELEGRAM_BOT_TOKEN")
+    telegram_chat_id: str | None = Field(default=None, alias="TELEGRAM_CHAT_ID")
+    cpr_report_hour: int = Field(default=21, ge=0, le=23, alias="CPR_REPORT_HOUR")
+    cpr_report_minute: int = Field(default=0, ge=0, le=59, alias="CPR_REPORT_MINUTE")
+    cpr_scanner_history_days: int = Field(default=20, ge=3, le=90, alias="CPR_SCANNER_HISTORY_DAYS")
+    cpr_scanner_segments: str = Field(default="CM", alias="CPR_SCANNER_SEGMENTS")
+    cpr_scanner_report_limit: int = Field(default=10, ge=1, le=30, alias="CPR_SCANNER_REPORT_LIMIT")
+    cpr_report_max_attempts: int = Field(default=3, ge=1, le=10, alias="CPR_REPORT_MAX_ATTEMPTS")
+    cpr_report_retry_minutes: int = Field(default=15, ge=1, le=120, alias="CPR_REPORT_RETRY_MINUTES")
 
 
 @lru_cache(maxsize=1)

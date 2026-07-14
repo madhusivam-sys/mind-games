@@ -1,6 +1,10 @@
 from __future__ import annotations
 
+import hmac
+
 import streamlit as st
+
+from utils.config import get_settings
 
 
 ACCENT = "#c58b2a"
@@ -124,6 +128,28 @@ def apply_theme() -> None:
         """,
         unsafe_allow_html=True,
     )
+    _require_dashboard_password()
+
+
+def _require_dashboard_password() -> None:
+    configured_password = get_settings().dashboard_password
+    if not configured_password:
+        return
+    if st.session_state.get("_dashboard_authenticated"):
+        if st.sidebar.button("Lock dashboard", key="_lock_dashboard"):
+            st.session_state["_dashboard_authenticated"] = False
+            st.rerun()
+        return
+
+    st.title("Bazaar Mind Games")
+    st.caption("Enter the private dashboard password to continue.")
+    supplied = st.text_input("Dashboard password", type="password", key="_dashboard_password_input")
+    if st.button("Unlock", type="primary", key="_unlock_dashboard"):
+        if hmac.compare_digest(supplied, configured_password):
+            st.session_state["_dashboard_authenticated"] = True
+            st.rerun()
+        st.error("Incorrect password.")
+    st.stop()
 
 
 def hero(title: str, subtitle: str) -> None:
