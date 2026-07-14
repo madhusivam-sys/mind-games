@@ -8,7 +8,17 @@ from zoneinfo import ZoneInfo
 import pandas as pd
 import pytest
 
-from services.cpr_scanner import BhavcopyError, ScanConfig, download_bhavcopy_history, load_bhavcopy_files, normalise_bhavcopy, scan_latest, telegram_report
+from services.cpr_scanner import (
+    BhavcopyError,
+    ScanConfig,
+    attach_mwpl_snapshot,
+    download_bhavcopy_history,
+    load_bhavcopy_files,
+    normalise_bhavcopy,
+    normalise_mwpl,
+    scan_latest,
+    telegram_report,
+)
 from services.cpr_scheduler import _next_run
 
 
@@ -71,6 +81,9 @@ def test_normalise_fo_selects_nearest_future_and_excludes_option() -> None:
             "LwPric": [790.0, 795.0, 8.0, 24900.0],
             "ClsPric": [805.0, 810.0, 11.0, 25050.0],
             "TtlTradgVol": [10_000, 5_000, 100_000, 50_000],
+            "TtlTrfVal": [8_000_000, 4_000_000, 1_000_000, 9_000_000],
+            "OpnIntrst": [100_000, 40_000, 500_000, 200_000],
+            "ChngInOpnIntrst": [5_000, -1_000, 20_000, 8_000],
         }
     )
 
@@ -80,6 +93,103 @@ def test_normalise_fo_selects_nearest_future_and_excludes_option() -> None:
     assert result.iloc[0]["close"] == 805.0
     assert result.iloc[0]["instrument"] == "FUTSTK"
     assert result.iloc[0]["asset_type"] == "F&O Stock Future"
+    assert result.iloc[0]["aggregate_open_interest"] == 140_000
+    assert result.iloc[0]["aggregate_turnover"] == 12_000_000
+    assert result.iloc[0]["reported_oi_change"] == 4_000
+    assert result.iloc[0]["futures_expiries"] == 2
+
+
+def test_normalise_mwpl_uses_future_equivalent_oi_and_official_gate() -> None:
+    raw = pd.DataFrame(
+        {
+            "NSE Symbol": ["DEMO"],
+            "MWPL": [1_000_000],
+            "Open Interest": [1_200_000],
+            "Future Equivalent Open Interest": [910_000],
+            "Limit for Next Day": ["No Fresh Positions"],
+        }
+    )
+
+    result = normalise_mwpl(raw).iloc[0]
+
+    assert result["mwpl_utilization_pct"] == 91.0
+    assert bool(result["mwpl_ban"])
+
+
+def test_scanner_restricts_universe_to_top_50_by_rolling_turnover() -> None:
+    rows: list[dict[str, object]] = []
+    for symbol_number in range(55):
+        for day in range(5):
+            rows.append(
+                {
+                    "symbol": f"S{symbol_number:02d}",
+                    "session_date": date(2026, 7, 1) + timedelta(days=day),
+                    "open": 100.0 + day,
+                    "high": 104.0 + day,
+                    "low": 99.0 + day,
+                    "close": 103.0 + day,
+                    "volume": 1_000 + symbol_number,
+                    "turnover": 1_000_000 * (symbol_number + 1),
+                    "aggregate_volume": 1_000 + symbol_number,
+                    "aggregate_turnover": 1_000_000 * (symbol_number + 1),
+                    "aggregate_open_interest": 10_000 + (day * 500),
+                    "asset_type": "F&O Stock Future",
+                }
+            )
+
+    result = scan_latest(pd.DataFrame(rows), ScanConfig(minimum_history=2))
+
+    assert len(result) == 50
+    assert set(f"S{number:02d}" for number in range(5)).isdisjoint(result["symbol"])
+    assert result["liquidity_rank"].min() == 1
+    assert result["liquidity_rank"].max() == 50
+
+
+def test_oi_confirmation_and_mwpl_penalty_are_auditable() -> None:
+    history = _history()
+    history["aggregate_open_interest"] = [10_000, 10_500, 11_000, 11_500, 12_500]
+    history["aggregate_volume"] = history["volume"]
+    history["aggregate_turnover"] = history["volume"] * history["close"]
+    snapshot = normalise_mwpl(
+        pd.DataFrame(
+            {
+                "NSE Symbol": ["DEMO"],
+                "MWPL": [100_000],
+                "Open Interest": [90_000],
+                "Future Equivalent Open Interest": [85_000],
+                "Limit for Next Day": ["15,000"],
+            }
+        )
+    )
+
+    result = scan_latest(attach_mwpl_snapshot(history, snapshot), ScanConfig(minimum_history=2)).iloc[0]
+
+    assert result["oi_regime"] == "Long buildup"
+    assert result["oi_score"] > 0
+    assert result["mwpl_utilization_pct"] == 85.0
+    assert result["mwpl_score"] == -1
+    assert bool(result["eligible"])
+
+
+def test_official_no_fresh_positions_gate_excludes_telegram_candidate() -> None:
+    history = _history()
+    history["aggregate_open_interest"] = [10_000, 10_500, 11_000, 11_500, 12_500]
+    snapshot = normalise_mwpl(
+        pd.DataFrame(
+            {
+                "NSE Symbol": ["DEMO"],
+                "MWPL": [100_000],
+                "Open Interest": [110_000],
+                "Future Equivalent Open Interest": [92_000],
+                "Limit for Next Day": ["No Fresh Positions"],
+            }
+        )
+    )
+
+    results = scan_latest(attach_mwpl_snapshot(history, snapshot), ScanConfig(minimum_history=2))
+
+    assert not bool(results.iloc[0]["eligible"])
+    assert "1. DEMO" not in telegram_report(results)
 
 
 def test_scanner_returns_auditable_ranked_candidate() -> None:

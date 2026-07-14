@@ -13,6 +13,7 @@ import pandas as pd
 
 
 NSE_ARCHIVE_ROOT = "https://nsearchives.nseindia.com/content"
+NSE_COMBINED_OI_URL = f"{NSE_ARCHIVE_ROOT}/nsccl/combineoi.zip"
 
 
 class BhavcopyError(ValueError):
@@ -25,6 +26,8 @@ class ScanConfig:
     max_narrow_width_percent: float = 0.70
     camarilla_tolerance_percent: float = 0.35
     minimum_history: int = 3
+    universe_size: int = 50
+    liquidity_lookback: int = 20
 
 
 _ALIASES: dict[str, tuple[str, ...]] = {
@@ -40,6 +43,8 @@ _ALIASES: dict[str, tuple[str, ...]] = {
     "close": ("clspric", "close", "closeprice"),
     "volume": ("ttltradgvol", "tottrdqty", "totaltradedquantity", "volume"),
     "turnover": ("ttltrfval", "tottrdval", "turnover"),
+    "open_interest": ("opnintrst", "openinterest", "openint", "oi"),
+    "change_in_open_interest": ("chnginopnintrst", "changeinopeninterest", "changeinoi", "chginoi"),
 }
 
 
@@ -81,7 +86,7 @@ def _parse_dates(values: pd.Series) -> pd.Series:
 
 
 def normalise_bhavcopy(frame: pd.DataFrame) -> pd.DataFrame:
-    """Convert legacy or UDiFF CM/FO bhavcopy columns into daily OHLC rows."""
+    """Build one row per stock/day with nearest-expiry OHLC and all-expiry participation."""
 
     normalised = pd.DataFrame(index=frame.index)
     normalised["session_date"] = _parse_dates(_column(frame, "date", required=True)).dt.date
@@ -90,7 +95,7 @@ def normalise_bhavcopy(frame: pd.DataFrame) -> pd.DataFrame:
     normalised["instrument"] = _column(frame, "instrument").fillna("").astype(str).str.strip().str.upper()
     normalised["expiry"] = _parse_dates(_column(frame, "expiry"))
     normalised["option_type"] = _column(frame, "option_type").fillna("").astype(str).str.strip().str.upper()
-    for column in ("open", "high", "low", "close", "volume", "turnover"):
+    for column in ("open", "high", "low", "close", "volume", "turnover", "open_interest", "change_in_open_interest"):
         normalised[column] = pd.to_numeric(_column(frame, column, required=column in {"open", "high", "low", "close"}), errors="coerce")
 
     normalised = normalised.dropna(subset=["session_date", "symbol", "open", "high", "low", "close"])
@@ -104,13 +109,76 @@ def normalise_bhavcopy(frame: pd.DataFrame) -> pd.DataFrame:
     future_rows["instrument"] = "FUTSTK"
     future_rows["asset_type"] = "F&O Stock Future"
     if not future_rows.empty:
-        future_rows = future_rows.sort_values(["symbol", "session_date", "expiry"])
-        future_rows = future_rows.groupby(["symbol", "session_date"], as_index=False, sort=False).first()
+        keys = ["symbol", "session_date"]
+        aggregates = future_rows.groupby(keys, as_index=False, sort=False).agg(
+            aggregate_volume=("volume", "sum"),
+            aggregate_turnover=("turnover", "sum"),
+            aggregate_open_interest=("open_interest", "sum"),
+            reported_oi_change=("change_in_open_interest", "sum"),
+            futures_expiries=("expiry", "nunique"),
+        )
+        nearest = future_rows.sort_values([*keys, "expiry"], na_position="last").groupby(keys, as_index=False, sort=False).first()
+        future_rows = nearest.merge(aggregates, on=keys, how="left")
 
     result = future_rows.reset_index(drop=True)
     if result.empty:
         raise BhavcopyError("No NSE stock-futures contracts (FUTSTK/STF) were found in the supplied F&O bhavcopy")
     return result.sort_values(["symbol", "session_date"]).drop_duplicates(["symbol", "session_date", "asset_type"], keep="last").reset_index(drop=True)
+
+
+def normalise_mwpl(frame: pd.DataFrame) -> pd.DataFrame:
+    """Normalise NSE's combined-OI report into one current row per symbol."""
+
+    lookup = {_key(column): column for column in frame.columns}
+
+    def field(*aliases: str, required: bool = True) -> pd.Series:
+        for alias in aliases:
+            if alias in lookup:
+                return frame[lookup[alias]]
+        if required:
+            raise BhavcopyError(f"Combined-OI report is missing {aliases[0]!r}")
+        return pd.Series(index=frame.index, dtype="object")
+
+    result = pd.DataFrame(index=frame.index)
+    result["symbol"] = field("nsesymbol", "symbol").astype(str).str.strip().str.upper()
+    result["mwpl"] = pd.to_numeric(field("mwpl"), errors="coerce")
+    result["combined_open_interest"] = pd.to_numeric(field("openinterest"), errors="coerce")
+    result["future_equivalent_open_interest"] = pd.to_numeric(
+        field("futureequivalentopeninterest", "futeqoi", required=False), errors="coerce"
+    ).fillna(result["combined_open_interest"])
+    limit = field("limitfornextday", required=False).fillna("").astype(str).str.strip()
+    result["mwpl_ban"] = limit.str.contains("no fresh", case=False, regex=False)
+    result["mwpl_utilization_pct"] = result["future_equivalent_open_interest"] / result["mwpl"].replace(0, np.nan) * 100.0
+    return result.dropna(subset=["symbol", "mwpl"]).drop_duplicates("symbol", keep="last").reset_index(drop=True)
+
+
+def download_mwpl_snapshot(client: httpx.Client | None = None) -> pd.DataFrame:
+    """Download the latest official combined open-interest/MWPL snapshot."""
+
+    owned_client = client is None
+    http = client or httpx.Client(timeout=30.0, follow_redirects=True, headers={"User-Agent": "Mozilla/5.0 CPRScanner/1.0"})
+    try:
+        response = http.get(NSE_COMBINED_OI_URL)
+        response.raise_for_status()
+        return normalise_mwpl(_read_csv_payload(response.content, "combineoi.zip"))
+    finally:
+        if owned_client:
+            http.close()
+
+
+def attach_mwpl_snapshot(history: pd.DataFrame, snapshot: pd.DataFrame) -> pd.DataFrame:
+    """Attach current MWPL fields only to the latest session in history."""
+
+    result = history.copy()
+    columns = ["mwpl", "combined_open_interest", "future_equivalent_open_interest", "mwpl_utilization_pct", "mwpl_ban"]
+    for column in columns:
+        result[column] = np.nan if column != "mwpl_ban" else False
+    latest = result["session_date"].eq(result["session_date"].max())
+    values = result.loc[latest, ["symbol"]].merge(snapshot[["symbol", *columns]], on="symbol", how="left")
+    for column in columns:
+        result.loc[latest, column] = values[column].to_numpy()
+    result["mwpl_ban"] = result["mwpl_ban"].fillna(False).astype(bool)
+    return result
 
 
 def load_bhavcopy_files(files: Iterable[tuple[str, bytes] | BinaryIO]) -> pd.DataFrame:
@@ -152,6 +220,7 @@ def download_bhavcopy_history(
     if tuple(segment.upper() for segment in segments) != ("FO",):
         raise BhavcopyError("The CPR scanner accepts only the NSE F&O bhavcopy (FO stock futures)")
     frames: list[pd.DataFrame] = []
+    mwpl_snapshot: pd.DataFrame | None = None
     try:
         for segment in segments:
             found = 0
@@ -169,12 +238,18 @@ def download_bhavcopy_history(
                 cursor -= timedelta(days=1)
             if found < 3:
                 raise BhavcopyError(f"NSE returned only {found} usable {segment} bhavcopies. Try upload mode or an earlier date.")
+        try:
+            mwpl_snapshot = download_mwpl_snapshot(http)
+        except (httpx.HTTPError, BhavcopyError, BadZipFile):
+            # Do not block CPR/OI scanning when the separate MWPL report is late.
+            pass
     finally:
         if owned_client:
             http.close()
-    return pd.concat(frames, ignore_index=True).sort_values(["symbol", "session_date"]).drop_duplicates(
+    history = pd.concat(frames, ignore_index=True).sort_values(["symbol", "session_date"]).drop_duplicates(
         ["symbol", "session_date", "asset_type"], keep="last"
     ).reset_index(drop=True)
+    return attach_mwpl_snapshot(history, mwpl_snapshot) if mwpl_snapshot is not None else history
 
 
 def _cpr(high: pd.Series, low: pd.Series, close: pd.Series) -> tuple[pd.Series, pd.Series, pd.Series]:
@@ -195,6 +270,44 @@ def build_scan_features(history: pd.DataFrame, config: ScanConfig = ScanConfig()
     for column in ("high", "low", "close"):
         rows[f"prev_{column}"] = group[column].shift(1)
     rows["prev_open"] = group["open"].shift(1)
+    rows["aggregate_volume"] = rows.get("aggregate_volume", rows["volume"]).fillna(0)
+    rows["aggregate_turnover"] = rows.get(
+        "aggregate_turnover", rows.get("turnover", pd.Series(0.0, index=rows.index))
+    ).fillna(0)
+    rows["aggregate_open_interest"] = rows.get("aggregate_open_interest", pd.Series(np.nan, index=rows.index))
+    group = rows.groupby(["asset_type", "symbol"], sort=False)
+    rows["price_change_pct"] = group["close"].pct_change(fill_method=None) * 100.0
+    rows["oi_change_pct"] = group["aggregate_open_interest"].pct_change(fill_method=None) * 100.0
+    rows["volume_oi_ratio"] = rows["aggregate_volume"] / rows["aggregate_open_interest"].replace(0, np.nan)
+    rows["liquidity_turnover"] = group["aggregate_turnover"].transform(
+        lambda series: series.rolling(config.liquidity_lookback, min_periods=1).median()
+    )
+    rows["liquidity_volume"] = group["aggregate_volume"].transform(
+        lambda series: series.rolling(config.liquidity_lookback, min_periods=1).median()
+    )
+    rows["oi_change_percentile"] = group["oi_change_pct"].transform(
+        lambda series: series.abs().rolling(20, min_periods=config.minimum_history).rank(pct=True)
+    )
+    rows["volume_oi_median"] = group["volume_oi_ratio"].transform(
+        lambda series: series.rolling(20, min_periods=config.minimum_history).median()
+    )
+    price_up = rows["price_change_pct"] > 0
+    oi_up = rows["oi_change_pct"] > 0
+    rows["oi_regime"] = np.select(
+        [price_up & oi_up, ~price_up & oi_up, price_up & ~oi_up, ~price_up & ~oi_up],
+        ["Long buildup", "Short buildup", "Short covering", "Long unwinding"],
+        default="Indeterminate",
+    )
+    indeterminate = (
+        rows["price_change_pct"].isna()
+        | rows["oi_change_pct"].isna()
+        | rows["price_change_pct"].eq(0)
+        | rows["oi_change_pct"].eq(0)
+    )
+    rows.loc[indeterminate, "oi_regime"] = "Indeterminate"
+    rows["high_oi_participation"] = (rows["oi_change_percentile"] >= 0.80) & (
+        rows["volume_oi_ratio"] > rows["volume_oi_median"]
+    )
 
     rows["pivot"], rows["bc"], rows["tc"] = _cpr(rows["prev_high"], rows["prev_low"], rows["prev_close"])
     rows["developing_pivot"], rows["developing_bc"], rows["developing_tc"] = _cpr(rows["high"], rows["low"], rows["close"])
@@ -233,6 +346,10 @@ def scan_latest(history: pd.DataFrame, config: ScanConfig = ScanConfig()) -> pd.
     features = build_scan_features(history, config)
     latest = features.groupby(["asset_type", "symbol"], sort=False, as_index=False).tail(1).copy()
     latest = latest[latest["prev_tc"].notna()].copy()
+    liquidity = latest["liquidity_turnover"].where(latest["liquidity_turnover"] > 0, latest["liquidity_volume"])
+    latest["liquidity_metric"] = liquidity.fillna(0)
+    latest = latest.nlargest(min(config.universe_size, len(latest)), ["liquidity_metric", "liquidity_volume"]).copy()
+    latest["liquidity_rank"] = latest["liquidity_metric"].rank(method="first", ascending=False).astype(int)
 
     rules: tuple[tuple[str, str, str, int], ...] = (
         ("narrow_cpr", "Narrow CPR", "neutral", 2),
@@ -258,7 +375,28 @@ def scan_latest(history: pd.DataFrame, config: ScanConfig = ScanConfig()) -> pd.
         bullish = sum(weight for _, direction, weight in matched if direction == "bullish")
         bearish = sum(weight for _, direction, weight in matched if direction == "bearish")
         direction = "Bullish" if bullish > bearish else "Bearish" if bearish > bullish else "Neutral"
-        score = sum(weight for _, _, weight in matched)
+        technical_score = sum(weight for _, _, weight in matched)
+        regime = str(row.get("oi_regime", "Indeterminate"))
+        regime_scores = {
+            "Bullish": {"Long buildup": 3, "Short buildup": -2, "Short covering": 1, "Long unwinding": -1},
+            "Bearish": {"Long buildup": -2, "Short buildup": 3, "Short covering": -1, "Long unwinding": 1},
+            "Neutral": {},
+        }
+        oi_score = regime_scores[direction].get(regime, 0)
+        if bool(row.get("high_oi_participation", False)) and oi_score:
+            oi_score += 1 if oi_score > 0 else -1
+        utilization = row.get("mwpl_utilization_pct", np.nan)
+        ban_value = row.get("mwpl_ban", False)
+        banned = bool(ban_value) if pd.notna(ban_value) else False
+        mwpl_score = (
+            -3
+            if banned or (pd.notna(utilization) and float(utilization) >= 90)
+            else -1
+            if pd.notna(utilization) and float(utilization) >= 80
+            else 0
+        )
+        eligible = not banned and not (pd.notna(utilization) and float(utilization) >= 95)
+        score = max(0, technical_score + oi_score + mwpl_score)
         records.append(
             {
                 "symbol": row["symbol"],
@@ -268,6 +406,17 @@ def scan_latest(history: pd.DataFrame, config: ScanConfig = ScanConfig()) -> pd.
                 "volume": int(row["volume"]) if pd.notna(row["volume"]) else 0,
                 "direction": direction,
                 "score": score,
+                "technical_score": technical_score,
+                "oi_score": oi_score,
+                "mwpl_score": mwpl_score,
+                "oi_regime": regime,
+                "oi_change_pct": round(float(row["oi_change_pct"]), 2) if pd.notna(row.get("oi_change_pct")) else np.nan,
+                "open_interest": int(row["aggregate_open_interest"]) if pd.notna(row.get("aggregate_open_interest")) else 0,
+                "mwpl_utilization_pct": round(float(utilization), 1) if pd.notna(utilization) else np.nan,
+                "mwpl_ban": banned,
+                "eligible": eligible,
+                "liquidity_rank": int(row["liquidity_rank"]),
+                "liquidity_turnover": float(row["liquidity_turnover"]),
                 "cpr_width_pct": round(float(row["cpr_width_percent"]), 3),
                 "pivot": round(float(row["pivot"]), 2),
                 "bc": round(float(row["bc"]), 2),
@@ -279,16 +428,28 @@ def scan_latest(history: pd.DataFrame, config: ScanConfig = ScanConfig()) -> pd.
     result = pd.DataFrame(records)
     if result.empty:
         return result
-    return result.sort_values(["score", "volume"], ascending=[False, False]).reset_index(drop=True)
+    return result.sort_values(["eligible", "score", "liquidity_rank"], ascending=[False, False, True]).reset_index(drop=True)
 
 
 def telegram_report(results: pd.DataFrame, limit: int = 10) -> str:
     if results.empty:
         return "CPR Scanner: no symbols had enough history to evaluate."
     as_of = max(results["session_date"])
-    lines = [f"📊 CPR Scanner — {as_of}", "Top stocks to track (technical watchlist only):", ""]
-    for rank, (_, row) in enumerate(results.head(limit).iterrows(), start=1):
+    lines = [f"📊 CPR + OI Scanner — {as_of}", "Top 50 liquid FUTSTK universe · technical watchlist only:", ""]
+    eligible = results[results["eligible"]] if "eligible" in results else results
+    for rank, (_, row) in enumerate(eligible.head(limit).iterrows(), start=1):
         lines.append(f"{rank}. {row['symbol']} | {row['direction']} | score {row['score']}")
-        lines.append(f"   ₹{row['close']} · {row['reasons']}")
+        oi_text = (
+            f"{row.get('oi_regime', 'OI unavailable')} ({row.get('oi_change_pct'):+.1f}%)"
+            if pd.notna(row.get("oi_change_pct"))
+            else "OI unavailable"
+        )
+        mwpl_text = (
+            f"MWPL {row['mwpl_utilization_pct']:.1f}%"
+            if pd.notna(row.get("mwpl_utilization_pct"))
+            else "MWPL unavailable"
+        )
+        lines.append(f"   ₹{row['close']} · {oi_text} · {mwpl_text}")
+        lines.append(f"   {row['reasons']}")
     lines.extend(["", "End-of-day bhavcopy screen. Verify price/action before making any decision."])
     return "\n".join(lines)
