@@ -9,7 +9,7 @@ from sklearn.linear_model import LogisticRegression
 from features.feature_store import load_sample_features
 from labels.breakout_labels import label_breakout_success
 from models.evaluate import EvaluationReport, evaluate_classifier
-from models.registry import save_model_artifact
+from models.registry import demo_artifact_metadata, save_model_artifact
 
 FEATURE_COLUMNS = ["distance_to_poc","distance_to_vah","distance_to_val","distance_to_vwap","aggression_score","cvd_slope","delta_slope","imbalance_cluster_count","poc_migration","breakout_through_lvn"]
 
@@ -51,7 +51,15 @@ def train_breakout_model() -> EvaluationReport:
     x_train, x_test, y_train, y_test = prepare_training_frame(include_target=True, feature_frame=frame)
     model = _fit_classifier(x_train, y_train)
     report = evaluate_classifier(model, x_test, y_test)
-    save_model_artifact("breakout_model", {"model": model, "feature_columns": list(x_train.columns), "report": report})
+    save_model_artifact(
+        "breakout_model",
+        {
+            "model": model,
+            "feature_columns": list(x_train.columns),
+            "report": report,
+            "metadata": demo_artifact_metadata(),
+        },
+    )
     return report
 
 

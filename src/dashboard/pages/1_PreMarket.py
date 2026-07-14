@@ -14,7 +14,7 @@ from dashboard.theme import apply_theme, hero
 
 apply_theme()
 base_url, query, prefer_live = dashboard_sidebar()
-hero("Pre-market structure", "Start with prior value, Camarilla and CPR levels before the session adds noise.", eyebrow="SESSION PREPARATION", badges=["Prior value", "Camarilla", "CPR", "Source diagnostics"])
+hero("Pre-Market Structure", "Start with prior value, Camarilla and CPR levels before the session adds noise.", eyebrow="SESSION PREPARATION", badges=["Prior Value", "Camarilla", "CPR", "Source Diagnostics"])
 
 try:
     context = load_dashboard_context(base_url, query, prefer_live)
@@ -27,9 +27,9 @@ row = st.columns(4)
 with row[0]:
     stat_card("Prior POC", f"{float(prior['poc']):,.2f}", prior['session_date'])
 with row[1]:
-    stat_card("Prior VAH", f"{float(prior['vah']):,.2f}", "value high")
+    stat_card("Prior VAH", f"{float(prior['vah']):,.2f}", "Value High")
 with row[2]:
-    stat_card("Prior VAL", f"{float(prior['val']):,.2f}", "value low")
+    stat_card("Prior VAL", f"{float(prior['val']):,.2f}", "Value Low")
 with row[3]:
     stat_card("Pivot", f"{float(prior['pivot']):,.2f}", context.data_source)
 
@@ -41,14 +41,14 @@ with cards[1]:
 with cards[2]:
     narrative_card("Data Status", f"Mode {context.session_mode} | As of {context.as_of_timestamp.replace('T', ' ')}")
 
-st.subheader("Connection diagnostics")
+st.subheader("Connection Diagnostics")
 data_table(
     st.session_state.get("_auth_frame") if False else __import__('pandas').DataFrame([context.auth_status]),
     ["configured", "authorized", "detail", "symbol", "as_of"],
     height=140,
 )
 
-st.subheader("Reference session")
+st.subheader("Reference Session")
 history = context.features.copy() if not context.features.empty else context.history.copy()
-previous_frame = history[history["session_date"] == prior["session_date"]].tail(1) if "session_date" in history.columns else history.tail(1)
+previous_frame = history[history["session_date"].astype(str) == str(prior["session_date"])].tail(1) if "session_date" in history.columns else history.tail(1)
 data_table(previous_frame, ["timestamp", "symbol", "developing_poc", "vah", "val", "h3", "h4", "l3", "l4", "pivot", "bc", "tc"], height=150)

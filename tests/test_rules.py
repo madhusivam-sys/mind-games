@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import pandas as pd
+import pytest
 
 from features.feature_store import load_sample_features
 from rules.alert_engine import AlertEngine
@@ -47,3 +48,17 @@ def test_alert_engine_returns_alert_objects() -> None:
     frame["failed_breakout_score"] = 75
     alerts = AlertEngine().build(frame)
     assert alerts
+
+
+def test_setup_score_engine_rejects_missing_features() -> None:
+    with pytest.raises(ValueError, match="missing required features"):
+        SetupScoreEngine().score_row(pd.Series({"timestamp": pd.Timestamp("2026-07-14"), "symbol": "NIFTY"}))
+
+
+def test_setup_proximity_scales_with_price_and_atr() -> None:
+    engine = SetupScoreEngine()
+    low_price = pd.Series({"close": 100.0, "atr_regime": 1.0})
+    high_price = pd.Series({"close": 20_000.0, "atr_regime": 10.0})
+
+    assert not engine._is_near(low_price, 4.0)
+    assert engine._is_near(high_price, 4.0)

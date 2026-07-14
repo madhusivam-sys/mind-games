@@ -35,11 +35,12 @@ src/
 1. Market data enters through `services.market_data_service`.
 2. Data is loaded either from CSV samples or live REST integrations.
 3. Feature modules calculate VWAP, CPR, Camarilla, profile, order-flow, and session context.
-4. Rule modules score setups and produce trader-readable reasons, invalidation, targets, and labels.
+4. Rule modules score setups and produce trader-readable reasons, invalidation, summaries, and labels.
 5. Service orchestration packages features, scores, alerts, model predictions, and briefing text.
 6. FastAPI routers expose these payloads as REST endpoints with generated OpenAPI documentation.
 7. The Streamlit dashboard calls the REST API through `dashboard.api_client`.
-8. The dashboard renders the backend-owned context and API console without duplicating scoring logic.
+8. The dashboard renders backend-owned context without duplicating scoring logic. FastAPI's
+   generated `/docs` page is the API inspection surface.
 
 ## REST and OpenAPI Contract
 
@@ -103,6 +104,7 @@ Testing should stay focused and behavioral:
 - Dashboard catalog tests to keep the UI aligned with public API paths.
 - Prefix-stability tests for any feature or setup condition that could leak future information.
 - Docker smoke tests in CI to verify the image can import the FastAPI app.
+- Backend module-import and Ruff checks to catch dead imports and broken module boundaries.
 
 Avoid unnecessary test cases that do not protect behavior.
 
@@ -120,6 +122,15 @@ GitHub Actions runs:
 
 1. Python dependency installation.
 2. Pytest unit and smoke tests.
-3. FastAPI app import smoke test.
-4. Docker image build.
-5. FastAPI app import smoke test inside Docker.
+3. Ruff static analysis and backend module-import checks.
+4. FastAPI app import smoke test.
+5. Docker image build as a non-root user image.
+6. FastAPI app import smoke test inside Docker.
+
+## Model Status
+
+The bundled classifiers are explicitly `demo_only` baselines trained on the small sample CSV.
+Their outputs exercise the training and inference pipeline, but they are not calibrated
+probabilities and must not be treated as production trading evidence. Promotion requires
+representative history, chronological out-of-sample validation, calibration analysis, and
+documented acceptance thresholds.

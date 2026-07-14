@@ -12,3 +12,8 @@ venv/
 *.log
 .idea/
 notebooks/
+tests/
+docs/
+.github/
+.agents/
+tradingview/

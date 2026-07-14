@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from pathlib import Path
-
 from ingestion.load_csv import CsvDataLoader
 from utils.config import repo_path
 

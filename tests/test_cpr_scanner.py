@@ -99,6 +99,30 @@ def test_normalise_fo_selects_nearest_future_and_excludes_option() -> None:
     assert result.iloc[0]["futures_expiries"] == 2
 
 
+def test_normalise_fo_excludes_expired_contract_before_nearest_selection() -> None:
+    raw = pd.DataFrame(
+        {
+            "TradDt": ["2026-07-10", "2026-07-10"],
+            "TckrSymb": ["SBIN", "SBIN"],
+            "FinInstrmTp": ["FUTSTK", "FUTSTK"],
+            "XpryDt": ["2026-06-25", "2026-07-30"],
+            "OpnPric": [700.0, 800.0],
+            "HghPric": [710.0, 810.0],
+            "LwPric": [690.0, 790.0],
+            "ClsPric": [705.0, 805.0],
+            "TtlTradgVol": [99_000, 10_000],
+            "OpnIntrst": [900_000, 100_000],
+        }
+    )
+
+    result = normalise_bhavcopy(raw)
+
+    assert len(result) == 1
+    assert result.iloc[0]["close"] == 805.0
+    assert result.iloc[0]["aggregate_open_interest"] == 100_000
+    assert result.iloc[0]["futures_expiries"] == 1
+
+
 def test_normalise_mwpl_uses_future_equivalent_oi_and_official_gate() -> None:
     raw = pd.DataFrame(
         {

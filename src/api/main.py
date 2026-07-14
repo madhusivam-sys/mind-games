@@ -4,7 +4,7 @@ from fastapi import FastAPI
 
 from api.routes import router as analytics_router
 from api.routes_context import router as context_router
-from api.routes_market_active import router as market_router
+from api.routes_market import router as market_router
 from utils.config import get_settings
 
 app = FastAPI(title=get_settings().app_name, version="0.2.0", description="Decision-support analytics API for intraday index futures.")

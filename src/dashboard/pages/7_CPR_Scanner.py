@@ -37,7 +37,9 @@ def _store_scan(history: pd.DataFrame) -> None:
             pass
     with st.spinner("Calculating CPR, OI and MWPL structures…"):
         st.session_state["cpr_results"] = scan_latest(history)
+        st.session_state["cpr_history"] = history.copy()
         st.session_state["cpr_rows"] = len(history)
+        st.session_state["dashboard_data_source"] = "NSE F&O Bhavcopy"
 
 
 def _scanner_styles() -> None:
@@ -91,7 +93,7 @@ def _scanner_styles() -> None:
 
 def _hero() -> None:
     hero(
-        "CPR futures radar",
+        "CPR Futures Radar",
         "Rank the 50 most liquid NSE stock futures with CPR structure, all-expiry open interest and official MWPL crowding.",
         eyebrow="NSE DERIVATIVES",
         badges=["FUTSTK only", "Top 50 liquidity", "Nearest-expiry CPR", "9 PM Telegram"],
@@ -110,6 +112,12 @@ def _section(title: str, caption: str) -> None:
         f'<div class="cpr-section"><h2>{escape(title)}</h2><p>{escape(caption)}</p></div>',
         unsafe_allow_html=True,
     )
+
+
+def _reset_filters() -> None:
+    for key in ("cpr_symbol_filter", "cpr_bias_filter", "cpr_status_filter", "cpr_minimum_score"):
+        st.session_state.pop(key, None)
+    st.rerun()
 
 
 def _focus_card(rank: int, candidate: pd.Series) -> None:
@@ -133,8 +141,8 @@ def _focus_card(rank: int, candidate: pd.Series) -> None:
 
 
 def _scan_controls(results: pd.DataFrame | None) -> None:
-    with st.expander("Run or refresh the scan", expanded=results is None):
-        source_tab, upload_tab, rules_tab = st.tabs(["Official NSE data", "Upload files", "Methodology"])
+    with st.expander("Run Or Refresh The Scan", expanded=results is None):
+        source_tab, upload_tab, rules_tab = st.tabs(["Official NSE Data", "Upload Files", "Methodology"])
         with source_tab:
             left, middle = st.columns([1.15, 1])
             with left:
@@ -142,7 +150,7 @@ def _scan_controls(results: pd.DataFrame | None) -> None:
             with middle:
                 history_days = st.slider("History", min_value=5, max_value=40, value=20, help="Twenty sessions is recommended for stable liquidity and CPR percentiles.")
             st.caption("Downloads only official NSE F&O files and keeps stock futures (STF/FUTSTK).")
-            if st.button("Download and run scan", type="primary", width="stretch"):
+            if st.button("Download And Run Scan", type="primary", width="stretch"):
                 try:
                     with st.spinner("Downloading official NSE end-of-day files…"):
                         history = download_bhavcopy_history(as_of, history_days, ("FO",))
@@ -158,7 +166,7 @@ def _scan_controls(results: pd.DataFrame | None) -> None:
                 accept_multiple_files=True,
                 help="Upload at least five daily files; twenty is recommended.",
             )
-            if st.button("Scan uploaded files", disabled=not uploads, width="stretch"):
+            if st.button("Scan Uploaded Files", disabled=not uploads, width="stretch"):
                 try:
                     history = load_bhavcopy_files([(upload.name, upload.getvalue()) for upload in uploads])
                     _store_scan(history)
@@ -176,7 +184,7 @@ def _scan_controls(results: pd.DataFrame | None) -> None:
                     - Narrow, ascending and descending CPR
                     - Virgin, inside and outside CPR
                     - Trend reversal and developing CPR
-                    - Camarilla S3 / R3 proximity
+                    - Camarilla L3 / H3 proximity
                     """
                 )
             with rules_right:
@@ -211,26 +219,27 @@ def _results_board(results: pd.DataFrame) -> None:
         _kpi("Bias", f"{bullish} ↑  {bearish} ↓", f"{int(crowded.sum())} crowded by MWPL")
 
     action_table = prepare_action_table(results)
-    _section("Tonight's radar", "The highest-ranked eligible contracts after CPR, OI and MWPL scoring.")
+    _section("Tonight's Radar", "The highest-ranked eligible contracts after CPR, OI and MWPL scoring.")
 
     filter_left, filter_bias, filter_status, filter_score = st.columns([1.55, 1, 1, 1])
     with filter_left:
-        symbol_query = st.text_input("Search symbol", placeholder="e.g. RELIANCE", label_visibility="collapsed")
+        symbol_query = st.text_input("Search Symbol", placeholder="E.g. RELIANCE", label_visibility="collapsed", key="cpr_symbol_filter")
     with filter_bias:
-        bias_filter = st.selectbox("Bias", ["All biases", "Bullish", "Bearish", "Neutral"], label_visibility="collapsed")
+        bias_filter = st.selectbox("Bias", ["All Biases", "Bullish", "Bearish", "Neutral"], label_visibility="collapsed", key="cpr_bias_filter")
     with filter_status:
-        status_filter = st.selectbox("Status", ["All statuses", "Track", "Crowding risk", "Avoid fresh positions"], label_visibility="collapsed")
+        status_filter = st.selectbox("Status", ["All Statuses", "Track", "Crowding Risk", "Avoid Fresh Positions"], label_visibility="collapsed", key="cpr_status_filter")
     with filter_score:
         maximum_score = max(1, int(results["score"].max()))
-        minimum_score = st.selectbox("Minimum score", list(range(0, maximum_score + 1)), index=min(3, maximum_score), format_func=lambda value: f"Score {value}+", label_visibility="collapsed")
+        minimum_score = st.selectbox("Minimum Score", list(range(0, maximum_score + 1)), index=min(3, maximum_score), format_func=lambda value: f"Score {value}+", label_visibility="collapsed", key="cpr_minimum_score")
 
     filtered = action_table[action_table["score"] >= minimum_score].copy()
     if symbol_query.strip():
         filtered = filtered[filtered["symbol"].str.contains(symbol_query.strip(), case=False, regex=False)]
-    if bias_filter != "All biases":
+    if bias_filter != "All Biases":
         filtered = filtered[filtered["direction"] == bias_filter]
-    if status_filter != "All statuses":
-        filtered = filtered[filtered["status"] == status_filter]
+    status_map = {"Crowding Risk": "Crowding risk", "Avoid Fresh Positions": "Avoid fresh positions"}
+    if status_filter != "All Statuses":
+        filtered = filtered[filtered["status"] == status_map.get(status_filter, status_filter)]
 
     st.caption(f"{len(filtered)} of {len(results)} contracts · CPR uses nearest expiry · OI and liquidity use all expiries")
     focus_mask = filtered.get("eligible", pd.Series(True, index=filtered.index)).fillna(False).astype(bool)
@@ -241,9 +250,11 @@ def _results_board(results: pd.DataFrame) -> None:
             with focus_columns[rank - 1]:
                 _focus_card(rank, candidate)
 
-    _section("Action table", "Scan quickly here, then open one contract below for the complete evidence trail.")
+    _section("Action Table", "Scan quickly here, then open one contract below for the complete evidence trail.")
     if filtered.empty:
         st.warning("No contracts match these filters. Clear the symbol or lower the score threshold.")
+        if st.button("Reset Filters", width="stretch", key="cpr_reset_empty"):
+            _reset_filters()
         return
 
     display = filtered[["liquidity_rank", "symbol", "bias", "score", "technical_score", "oi_score", "oi_view", "mwpl_view", "status", "trigger"]]
@@ -266,7 +277,7 @@ def _results_board(results: pd.DataFrame) -> None:
         },
     )
 
-    _section("Contract review", "A compact score breakdown and the exact levels behind the selected row.")
+    _section("Contract Review", "A compact score breakdown and the exact levels behind the selected row.")
     selected_symbol = st.selectbox("Select contract", filtered["symbol"].tolist(), label_visibility="collapsed")
     selected = filtered[filtered["symbol"] == selected_symbol].iloc[0]
     detail_left, detail_middle, detail_right = st.columns([1.15, 1, 1])
@@ -300,24 +311,27 @@ def _results_board(results: pd.DataFrame) -> None:
         )
         st.plotly_chart(chart, width="stretch")
 
-    action_left, action_right = st.columns(2)
+    action_left, action_middle, action_right = st.columns(3)
     with action_left:
         st.download_button(
             "Download filtered CSV", filtered.to_csv(index=False).encode("utf-8"),
             file_name=f"cpr-scanner-{latest_date}.csv", mime="text/csv", width="stretch",
         )
+    with action_middle:
+        if st.button("Reset Filters", width="stretch"):
+            _reset_filters()
     with action_right:
         settings = get_settings()
         configured = bool(settings.telegram_bot_token and settings.telegram_chat_id)
         if configured:
-            if st.button("Send filtered report to Telegram", width="stretch"):
+            if st.button("Send Filtered Report To Telegram", width="stretch"):
                 try:
                     send_telegram_message(settings.telegram_bot_token or "", settings.telegram_chat_id or "", telegram_report(filtered))
                     st.success("Report sent to Telegram.")
                 except TelegramError as exc:
                     st.error(str(exc))
         else:
-            st.button("Telegram is not configured", disabled=True, width="stretch")
+            st.button("Telegram Is Not Configured", disabled=True, width="stretch")
 
 
 def _legacy_main() -> None:
@@ -365,7 +379,7 @@ def _legacy_main() -> None:
             - **Trend reversal:** an end-of-day pivot/CPR reclaim or rejection, confirmed against the prior pivot relationship.
             - **Virgin CPR:** the session's range never touched its CPR.
             - **Inside / outside CPR:** today's range of BC–TC is contained by, or contains, the previous CPR.
-            - **Camarilla S3 / R3:** close is within 0.35% of the prior-range S3 or R3 level.
+            - **Camarilla L3 / H3:** close is within 0.35% of the prior-range L3 or H3 level.
             - **Developing CPR:** tomorrow's CPR, calculated from today's completed high, low, and close.
             - **Liquidity universe:** only the top 50 underlyings by 20-session median aggregate FUTSTK turnover are retained. All expiries are included.
             - **OI interpretation:** price up/OI up = long buildup; price down/OI up = short buildup; price up/OI down = short covering; price down/OI down = long unwinding.
@@ -396,7 +410,7 @@ def _legacy_main() -> None:
     cards[3].metric("Bias split", f"{len(bullish)} ↑ / {len(bearish)} ↓")
 
     action_table = prepare_action_table(results)
-    st.subheader("Action board")
+    st.subheader("Action Board")
     filter_left, filter_middle, filter_right = st.columns([1.5, 1, 1])
     with filter_left:
         symbol_query = st.text_input("Find a stock future", placeholder="Type a symbol, e.g. LT")
@@ -481,7 +495,7 @@ def _legacy_main() -> None:
         width="stretch",
     )
 
-    st.subheader("Telegram report")
+    st.subheader("Telegram Report")
     settings = get_settings()
     configured = bool(settings.telegram_bot_token and settings.telegram_chat_id)
     st.caption("Nightly delivery is scheduled for 9:00 PM Asia/Kolkata when the scheduler service is running.")

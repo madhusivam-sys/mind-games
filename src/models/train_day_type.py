@@ -5,7 +5,7 @@ from sklearn.ensemble import RandomForestClassifier
 
 from labels.day_type import label_day_type
 from models.evaluate import EvaluationReport, evaluate_classifier
-from models.registry import save_model_artifact
+from models.registry import demo_artifact_metadata, save_model_artifact
 from models.train_breakout_model import prepare_training_frame
 
 
@@ -21,7 +21,15 @@ def train_day_type_model() -> EvaluationReport:
         model = RandomForestClassifier(n_estimators=100, max_depth=4, random_state=42)
     model.fit(x_train, y_train)
     report = evaluate_classifier(model, x_test, y_test)
-    save_model_artifact("day_type_model", {"model": model, "feature_columns": list(x_train.columns), "report": report})
+    save_model_artifact(
+        "day_type_model",
+        {
+            "model": model,
+            "feature_columns": list(x_train.columns),
+            "report": report,
+            "metadata": demo_artifact_metadata(),
+        },
+    )
     return report
 
 

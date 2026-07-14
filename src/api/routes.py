@@ -9,6 +9,7 @@ from fastapi import APIRouter
 from api.schemas import AnalyzeRequest, UploadResponse
 from labels.day_type import label_day_type
 from models.predict import predict_frame
+from models.registry import DEMO_MODEL_NOTICE, DEMO_MODEL_STATUS
 from services.market_data_service import MarketDataService
 from services.signal_service import SignalService, to_jsonifiable
 from utils.config import get_paths, get_settings
@@ -71,7 +72,10 @@ def prior_session_summary(request: AnalyzeRequest) -> dict[str, object]:
 @router.post("/model-predictions")
 def model_predictions(request: AnalyzeRequest) -> dict[str, object]:
     features, _scores, _alerts = build_analysis(request.csv_path, request.symbol)
-    predictions: dict[str, object] = {}
+    predictions: dict[str, object] = {
+        "model_status": DEMO_MODEL_STATUS,
+        "model_notice": DEMO_MODEL_NOTICE,
+    }
     for name in ["day_type_model", "breakout_model", "reversal_model"]:
         try:
             predictions[name] = float(predict_frame(name, features).iloc[-1])

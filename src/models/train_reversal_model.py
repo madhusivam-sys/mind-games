@@ -6,7 +6,7 @@ from sklearn.ensemble import RandomForestClassifier
 from features.feature_store import load_sample_features
 from labels.reversal_labels import label_reversal_success
 from models.evaluate import EvaluationReport, evaluate_classifier
-from models.registry import save_model_artifact
+from models.registry import demo_artifact_metadata, save_model_artifact
 from models.train_breakout_model import FEATURE_COLUMNS
 
 
@@ -28,7 +28,15 @@ def train_reversal_model() -> EvaluationReport:
         model = RandomForestClassifier(n_estimators=100, max_depth=4, random_state=42)
     model.fit(x_train, y_train)
     report = evaluate_classifier(model, x_test, y_test)
-    save_model_artifact("reversal_model", {"model": model, "feature_columns": list(x_train.columns), "report": report})
+    save_model_artifact(
+        "reversal_model",
+        {
+            "model": model,
+            "feature_columns": list(x_train.columns),
+            "report": report,
+            "metadata": demo_artifact_metadata(),
+        },
+    )
     return report
 
 

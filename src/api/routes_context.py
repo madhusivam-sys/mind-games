@@ -8,6 +8,7 @@ from fastapi import APIRouter, HTTPException, Query
 from integrations.market_data_client import MarketDataClientError
 from labels.day_type import label_day_type
 from models.predict import predict_frame
+from models.registry import DEMO_MODEL_NOTICE, DEMO_MODEL_STATUS
 from services.briefing import build_trade_brief
 from services.market_data_service import build_live_market_data_service
 from services.signal_service import SignalService, to_jsonifiable
@@ -51,7 +52,10 @@ def _session_summary(feature_frame) -> dict[str, object]:
 
 
 def _model_predictions(feature_frame) -> dict[str, object]:
-    predictions: dict[str, object] = {}
+    predictions: dict[str, object] = {
+        "model_status": DEMO_MODEL_STATUS,
+        "model_notice": DEMO_MODEL_NOTICE,
+    }
     for name in ["day_type_model", "breakout_model", "reversal_model"]:
         try:
             predictions[name] = float(predict_frame(name, feature_frame).iloc[-1])

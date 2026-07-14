@@ -10,9 +10,9 @@ readme = "README.md"
 requires-python = ">=3.11"
 authors = [{ name = "OpenAI Codex" }]
 dependencies = [
+  "apscheduler==3.11.3",
   "fastapi==0.118.0",
   "httpx==0.28.1",
-  "matplotlib==3.10.6",
   "numpy==2.3.2",
   "pandas==2.3.1",
   "plotly==6.3.0",
@@ -21,7 +21,6 @@ dependencies = [
   "python-dotenv==1.1.1",
   "pyyaml==6.0.2",
   "scikit-learn==1.7.1",
-  "sqlalchemy==2.0.43",
   "streamlit==1.49.0",
   "uvicorn[standard]==0.37.0",
 ]
@@ -53,6 +52,12 @@ addopts = "-q"
 [tool.ruff]
 line-length = 100
 target-version = "py311"
+
+[tool.ruff.lint.per-file-ignores]
+"src/dashboard/app.py" = ["E402"]
+"src/dashboard/api_console_page.py" = ["E402"]
+"src/dashboard/pages/*.py" = ["E402"]
+"tests/test_api.py" = ["E402"]
 
 [tool.mypy]
 python_version = "3.11"

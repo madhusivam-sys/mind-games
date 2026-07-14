@@ -6,14 +6,65 @@ import numpy as np
 import pandas as pd
 
 
-def _profile_levels(window: pd.DataFrame) -> tuple[float, float, float]:
-    grouped = window.groupby(window["close"].round(2))["volume"].sum().sort_index()
-    cumulative = grouped.cumsum()
-    total = grouped.sum()
-    poc = float(grouped.idxmax())
-    vah = float(grouped.index[min(np.searchsorted(cumulative.to_numpy(), total * 0.85, side="left"), len(grouped.index) - 1)])
-    val = float(grouped.index[min(np.searchsorted(cumulative.to_numpy(), total * 0.15, side="left"), len(grouped.index) - 1)])
-    return poc, vah, val
+class _FenwickTree:
+    """Maintain prefix volume totals with logarithmic updates and percentile lookup."""
+
+    def __init__(self, size: int) -> None:
+        self.values = [0.0] * (size + 1)
+
+    def add(self, index: int, value: float) -> None:
+        position = index + 1
+        while position < len(self.values):
+            self.values[position] += value
+            position += position & -position
+
+    def lower_bound(self, target: float) -> int:
+        if target <= 0:
+            return 0
+        index = 0
+        accumulated = 0.0
+        bit = 1 << (len(self.values).bit_length() - 1)
+        while bit:
+            candidate = index + bit
+            if candidate < len(self.values) and accumulated + self.values[candidate] < target:
+                index = candidate
+                accumulated += self.values[candidate]
+            bit >>= 1
+        return min(index, len(self.values) - 2)
+
+
+def _developing_profile_levels(close: pd.Series, volume: pd.Series) -> tuple[list[float], list[float], list[float]]:
+    """Build prefix-stable profile levels with an incremental price-volume accumulator."""
+
+    rounded_close = close.round(2)
+    ordered_prices = sorted(float(value) for value in rounded_close.unique())
+    price_indexes = {price: index for index, price in enumerate(ordered_prices)}
+    volume_by_price = [0.0] * len(ordered_prices)
+    volume_tree = _FenwickTree(len(ordered_prices))
+    pocs: list[float] = []
+    vahs: list[float] = []
+    vals: list[float] = []
+    total = 0.0
+    poc = ordered_prices[0]
+    poc_volume = float("-inf")
+    for price_value, volume_value in zip(rounded_close, volume.fillna(0.0), strict=True):
+        price = float(price_value)
+        traded_volume = float(volume_value)
+        price_index = price_indexes[price]
+        volume_by_price[price_index] += traded_volume
+        volume_tree.add(price_index, traded_volume)
+        total += traded_volume
+
+        updated_volume = volume_by_price[price_index]
+        if updated_volume > poc_volume or (updated_volume == poc_volume and price < poc):
+            poc = price
+            poc_volume = updated_volume
+        value_high_index = volume_tree.lower_bound(total * 0.85)
+        value_low_index = volume_tree.lower_bound(total * 0.15)
+        pocs.append(float(poc))
+        vahs.append(float(ordered_prices[value_high_index]))
+        vals.append(float(ordered_prices[value_low_index]))
+    return pocs, vahs, vals
 
 
 @dataclass(slots=True)
@@ -35,15 +86,7 @@ class MarketProfileEngine:
                 session.loc[session.index[self.ib_bars :], "ib_low"] = session["ib_low"].iloc[self.ib_bars - 1]
             session["ib_range"] = session["ib_high"] - session["ib_low"]
 
-            poc: list[float] = []
-            vah: list[float] = []
-            val: list[float] = []
-            for index in range(len(session)):
-                current = session.iloc[: index + 1]
-                p, h, l = _profile_levels(current)
-                poc.append(p)
-                vah.append(h)
-                val.append(l)
+            poc, vah, val = _developing_profile_levels(session["close"], session["volume"])
             session["developing_poc"] = poc
             session["vah"] = vah
             session["val"] = val

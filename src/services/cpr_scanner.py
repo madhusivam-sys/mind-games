@@ -106,6 +106,10 @@ def normalise_bhavcopy(frame: pd.DataFrame) -> pd.DataFrame:
     # label. Cash shares, options, and index futures are intentionally excluded.
     is_stock_future = normalised["instrument"].isin(["STF", "FUTSTK"])
     future_rows = normalised[is_stock_future].copy()
+    valid_expiry = future_rows["expiry"].isna() | (
+        future_rows["expiry"].dt.date >= future_rows["session_date"]
+    )
+    future_rows = future_rows[valid_expiry].copy()
     future_rows["instrument"] = "FUTSTK"
     future_rows["asset_type"] = "F&O Stock Future"
     if not future_rows.empty:
@@ -318,8 +322,8 @@ def build_scan_features(history: pd.DataFrame, config: ScanConfig = ScanConfig()
     rows["width_percentile"] = group["cpr_width_percent"].transform(lambda series: series.rolling(20, min_periods=config.minimum_history).rank(pct=True))
 
     prior_range = rows["prev_high"] - rows["prev_low"]
-    rows["r3"] = rows["prev_close"] + (prior_range * 1.1 / 4.0)
-    rows["s3"] = rows["prev_close"] - (prior_range * 1.1 / 4.0)
+    rows["h3"] = rows["prev_close"] + (prior_range * 1.1 / 4.0)
+    rows["l3"] = rows["prev_close"] - (prior_range * 1.1 / 4.0)
     tolerance = rows["close"].abs() * (config.camarilla_tolerance_percent / 100.0)
 
     rows["narrow_cpr"] = (rows["width_percentile"] <= config.narrow_percentile) & (
@@ -333,8 +337,8 @@ def build_scan_features(history: pd.DataFrame, config: ScanConfig = ScanConfig()
     rows["virgin_cpr_below"] = rows["high"] < rows["bc"]
     rows["bullish_reversal"] = (rows["open"] < rows["pivot"]) & (rows["close"] > rows["tc"]) & (rows["prev_close"] < rows["prev_pivot"])
     rows["bearish_reversal"] = (rows["open"] > rows["pivot"]) & (rows["close"] < rows["bc"]) & (rows["prev_close"] > rows["prev_pivot"])
-    rows["near_r3"] = (rows["close"] - rows["r3"]).abs() <= tolerance
-    rows["near_s3"] = (rows["close"] - rows["s3"]).abs() <= tolerance
+    rows["near_h3"] = (rows["close"] - rows["h3"]).abs() <= tolerance
+    rows["near_l3"] = (rows["close"] - rows["l3"]).abs() <= tolerance
     rows["developing_ascending"] = rows["developing_bc"] > rows["tc"]
     rows["developing_descending"] = rows["developing_tc"] < rows["bc"]
     rows["developing_inside"] = (rows["developing_bc"] >= rows["bc"]) & (rows["developing_tc"] <= rows["tc"])
@@ -361,8 +365,8 @@ def scan_latest(history: pd.DataFrame, config: ScanConfig = ScanConfig()) -> pd.
         ("virgin_cpr_below", "Virgin CPR above price", "bearish", 2),
         ("bullish_reversal", "Bullish trend reversal", "bullish", 3),
         ("bearish_reversal", "Bearish trend reversal", "bearish", 3),
-        ("near_r3", "Close near Camarilla R3", "bullish", 1),
-        ("near_s3", "Close near Camarilla S3", "bearish", 1),
+        ("near_h3", "Close near Camarilla H3", "bullish", 1),
+        ("near_l3", "Close near Camarilla L3", "bearish", 1),
         ("developing_ascending", "Tomorrow CPR developing higher", "bullish", 2),
         ("developing_descending", "Tomorrow CPR developing lower", "bearish", 2),
         ("developing_inside", "Tomorrow CPR developing inside", "neutral", 1),

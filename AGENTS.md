@@ -26,43 +26,28 @@ Engineering guardrails:
 - Do not add duplicate business logic paths across API, dashboard, and research flows.
 - If a dataset is too small for a stable train/test class split, prefer explicit baseline fallbacks over synthetic target manipulation.
 
-Setup contract:
-Each setup module must return:
+Implemented setup contract:
+Each score result returns:
+- timestamp
+- symbol
 - setup_name
-- active
-- direction
 - score
+- label
 - reasons
 - invalidation
-- targets
-- context_fit
+- summary
 
-Initial setup list:
-1. Initial Balance Breakout
-2. Initial Balance Fade
-3. Value Area Rotation Trade
-4. Value Area Breakout
-5. POC Magnet Trade
-6. Poor High / Poor Low Repair
-7. Single Print Retest
-8. LVN Rejection
-9. HVN Rotation
-10. Double Distribution Continuation
-11. Trend Day Pullback
-12. Failed Trend Day
-13. Inventory Correction
-14. Gap and Go
-15. Gap Fill
-16. Value Migration Trend
-17. Composite Balance Break
-18. Acceptance Above Resistance
-19. Rejection of Higher Prices
-20. Absorption Setup
-21. Delta Divergence
-22. CVD Divergence
-23. Stop Run Reversal
-24. Liquidity Vacuum Move
-25. Initiative vs Responsive Flip
+Implemented setup list:
+1. Responsive Buy
+2. Responsive Sell
+3. Breakout Continuation
+4. Failed Breakout
+5. Trap Detection
+6. Absorption Warning
+7. Confluence Score
+
+The earlier 25-item list is a research backlog, not an implemented runtime contract. New
+setups should be added individually with tests and documentation only when their rules exist.
 
 Testing expectations:
 - Add or update pytest coverage for every new setup module.

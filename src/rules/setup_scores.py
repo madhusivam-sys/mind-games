@@ -7,6 +7,18 @@ import pandas as pd
 from utils.math_utils import clip_score
 
 
+REQUIRED_SCORING_COLUMNS = {
+    "timestamp", "symbol", "open", "high", "low", "close", "vah", "val", "vwap",
+    "atr_regime", "acceptance_above_prior_value", "acceptance_below_prior_value",
+    "distance_to_val", "distance_to_vah", "distance_to_vwap", "distance_to_poc",
+    "distance_to_l3", "distance_to_l4", "distance_to_h3", "distance_to_h4",
+    "distance_to_pivot", "vwap_reclaim", "vwap_slope", "poc_migration", "cvd_slope",
+    "delta", "price_delta_divergence", "price_cvd_divergence", "absorption_proxy",
+    "breakout_through_lvn", "rejection_from_hvn", "trapped_buyer_proxy",
+    "trapped_seller_proxy", "imbalance_cluster_count",
+}
+
+
 @dataclass(slots=True)
 class ScoreResult:
     timestamp: pd.Timestamp
@@ -20,9 +32,12 @@ class ScoreResult:
 
 
 class SetupScoreEngine:
-    """Auction-market oriented scoring for intraday index futures."""
+    """Auditable auction-market heuristics; weights are not statistically calibrated."""
 
     def score_row(self, row: pd.Series) -> list[ScoreResult]:
+        missing = sorted(REQUIRED_SCORING_COLUMNS.difference(row.index))
+        if missing:
+            raise ValueError(f"Scoring row is missing required features: {', '.join(missing)}")
         return [
             self._responsive_buy(row),
             self._responsive_sell(row),
@@ -40,8 +55,17 @@ class SetupScoreEngine:
         return results
 
     @staticmethod
-    def _is_near(level_distance: float, threshold: float = 10.0) -> bool:
-        return abs(level_distance) <= threshold
+    def _distance_tolerance(row: pd.Series, sensitivity: float = 1.0) -> float:
+        """Scale proximity to instrument price and recent true range."""
+
+        close = abs(float(row["close"]))
+        atr = abs(float(row["atr_regime"]))
+        base = max(close * 0.0005, atr * 0.5, 0.01)
+        return base * sensitivity
+
+    @classmethod
+    def _is_near(cls, row: pd.Series, level_distance: float, sensitivity: float = 1.0) -> bool:
+        return abs(float(level_distance)) <= cls._distance_tolerance(row, sensitivity)
 
     @staticmethod
     def _accepted_above_value(row: pd.Series) -> bool:
@@ -62,7 +86,7 @@ class SetupScoreEngine:
         score = 0.0
         reasons: list[str] = []
 
-        if self._is_near(row.get("distance_to_val", 999.0), 12.0):
+        if self._is_near(row, row["distance_to_val"], 1.2):
             score += 22
             reasons.append("Price is testing the lower value edge.")
         if row.get("close", 0.0) > row.get("val", float("inf")) and row.get("low", 0.0) <= row.get("val", float("-inf")):
@@ -83,7 +107,7 @@ class SetupScoreEngine:
         if row.get("absorption_proxy", 0) == 1:
             score += 12
             reasons.append("Absorption is active at lower prices.")
-        if self._is_near(row.get("distance_to_l3", 999.0), 10.0) or self._is_near(row.get("distance_to_l4", 999.0), 10.0):
+        if self._is_near(row, row["distance_to_l3"]) or self._is_near(row, row["distance_to_l4"]):
             score += 14
             reasons.append("Camarilla support is aligned with the auction response.")
 
@@ -94,7 +118,7 @@ class SetupScoreEngine:
         score = 0.0
         reasons: list[str] = []
 
-        if self._is_near(row.get("distance_to_vah", 999.0), 12.0):
+        if self._is_near(row, row["distance_to_vah"], 1.2):
             score += 22
             reasons.append("Price is testing the upper value edge.")
         if row.get("close", 0.0) < row.get("vah", float("-inf")) and row.get("high", 0.0) >= row.get("vah", float("inf")):
@@ -115,7 +139,7 @@ class SetupScoreEngine:
         if row.get("absorption_proxy", 0) == 1:
             score += 12
             reasons.append("Absorption is active at higher prices.")
-        if self._is_near(row.get("distance_to_h3", 999.0), 10.0) or self._is_near(row.get("distance_to_h4", 999.0), 10.0):
+        if self._is_near(row, row["distance_to_h3"]) or self._is_near(row, row["distance_to_h4"]):
             score += 14
             reasons.append("Camarilla resistance is aligned with the auction response.")
 
@@ -144,7 +168,7 @@ class SetupScoreEngine:
         if row.get("price_cvd_divergence", 0) == 0 and row.get("price_delta_divergence", 0) == 0:
             score += 10
             reasons.append("Price is not diverging from delta/CVD.")
-        if self._is_near(row.get("distance_to_h4", 999.0), 12.0) or row.get("close", 0.0) > row.get("h4", float("inf")):
+        if self._is_near(row, row["distance_to_h4"], 1.2) or row["close"] > row.get("h4", float("inf")):
             score += 14
             reasons.append("Camarilla H4 participation adds breakout confluence.")
 
@@ -219,7 +243,7 @@ class SetupScoreEngine:
         if row.get("price_cvd_divergence", 0) == 1:
             score += 12
             reasons.append("CVD is not confirming the move.")
-        if self._is_near(row.get("distance_to_poc", 999.0), 8.0):
+        if self._is_near(row, row["distance_to_poc"], 0.8):
             score += 10
             reasons.append("Absorption is happening near the current fair-value pivot.")
 
@@ -231,10 +255,10 @@ class SetupScoreEngine:
         reasons: list[str] = []
 
         for condition, text, weight in [
-            (self._is_near(row.get("distance_to_poc", 999.0), 8.0), "Current price is anchored near developing POC.", 16),
-            (self._is_near(row.get("distance_to_vwap", 999.0), 8.0), "VWAP is overlapping current auction price.", 14),
-            (self._is_near(row.get("distance_to_h3", 999.0), 8.0) or self._is_near(row.get("distance_to_l3", 999.0), 8.0), "Camarilla level overlaps the current auction zone.", 16),
-            (self._is_near(row.get("distance_to_pivot", 999.0), 8.0), "CPR pivot is in play.", 12),
+            (self._is_near(row, row["distance_to_poc"], 0.8), "Current price is anchored near developing POC.", 16),
+            (self._is_near(row, row["distance_to_vwap"], 0.8), "VWAP is overlapping current auction price.", 14),
+            (self._is_near(row, row["distance_to_h3"], 0.8) or self._is_near(row, row["distance_to_l3"], 0.8), "Camarilla level overlaps the current auction zone.", 16),
+            (self._is_near(row, row["distance_to_pivot"], 0.8), "CPR pivot is in play.", 12),
             (row.get("poc_migration", 0.0) != 0, "POC is actively migrating.", 16),
             (row.get("vwap_reclaim", 0) == 1, "VWAP reclaim adds structural confirmation.", 12),
             (row.get("price_delta_divergence", 0) == 0 and row.get("price_cvd_divergence", 0) == 0, "Order flow is aligned with price.", 14),

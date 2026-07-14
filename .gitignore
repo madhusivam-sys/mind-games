@@ -10,3 +10,4 @@ venv/
 build/
 dist/
 *.log
+data/processed/cpr_scheduler_state.json

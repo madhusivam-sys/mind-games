@@ -47,7 +47,6 @@ class Settings(BaseSettings):
     app_name: str = Field(default="Bazaar Mind Games", alias="APP_NAME")
     dashboard_password: str | None = Field(default=None, alias="DASHBOARD_PASSWORD")
     data_root: Path = Field(default=ROOT_DIR / "data", alias="DATA_ROOT")
-    database_url: str = Field(default="sqlite:///./data/processed/bazaar_mind_games.db", alias="DATABASE_URL")
     default_symbol: str = Field(default="NIFTY_FUT", alias="DEFAULT_SYMBOL")
     timezone: str = Field(default="Asia/Kolkata", alias="TIMEZONE")
     log_level: str = Field(default="INFO", alias="LOG_LEVEL")

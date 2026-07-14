@@ -15,7 +15,7 @@ from dashboard.theme import apply_theme, hero
 
 apply_theme()
 base_url, query, prefer_live = dashboard_sidebar()
-hero("Trade review", "Turn recent signals into feedback by comparing setup quality with forward price excursion.", eyebrow="POST-MARKET REVIEW", badges=["Signal replay", "Forward excursion", "Process feedback"])
+hero("Trade Review", "Turn recent signals into feedback by comparing setup quality with forward price excursion.", eyebrow="POST-MARKET REVIEW", badges=["Signal Replay", "Forward Excursion", "Process Feedback"])
 
 try:
     context = load_dashboard_context(base_url, query, prefer_live)
@@ -37,8 +37,8 @@ with cols[2]:
     expectancy = history["forward_3bar_move"].dropna().mean()
     stat_card("Avg +3 Bar Move", f"{expectancy:,.2f}", "simple proxy")
 
-st.subheader("Confirmed signals")
+st.subheader("Confirmed Signals")
 data_table(signal_frame, ["timestamp", "symbol", "setup_name", "score", "label", "summary"], height=220)
 
-st.subheader("Recent market replay")
+st.subheader("Recent Market Replay")
 data_table(history.tail(40), ["timestamp", "symbol", "open", "high", "low", "close", "volume", "forward_3bar_move"], height=380)

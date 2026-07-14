@@ -6,6 +6,20 @@ from typing import Any
 
 from utils.config import get_paths
 
+DEMO_MODEL_STATUS = "demo_only"
+DEMO_MODEL_NOTICE = (
+    "Experimental baseline trained on the bundled sample dataset; not calibrated for trading use."
+)
+
+
+def demo_artifact_metadata() -> dict[str, str]:
+    return {
+        "status": DEMO_MODEL_STATUS,
+        "training_source": "data/samples/nifty_futures_sample.csv",
+        "validation": "small chronological holdout",
+        "notice": DEMO_MODEL_NOTICE,
+    }
+
 
 def model_dir() -> Path:
     path = get_paths().model_dir
